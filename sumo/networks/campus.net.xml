@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Eclipse SUMO Network definition for EventFlow Venue: DTU Auditorium Campus -->
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+    <location netOffset="0.00,0.00" convBoundary="0.00,0.00,500.00,400.00" origBoundary="77.1180,28.7495,77.1240,28.7550" projParameter="!"/>
+
+    <!-- Auditorium Center Nodes -->
+    <junction id="auditorium_center" type="priority" x="250.00" y="200.00" incLanes="" intLanes="" shape="240.00,190.00 260.00,190.00 260.00,210.00 240.00,210.00"/>
+    <junction id="gate_1_node" type="priority" x="250.00" y="320.00" incLanes="aud_to_g1_0" intLanes="" shape="245.00,315.00 255.00,315.00 255.00,325.00 245.00,325.00"/>
+    <junction id="gate_2_node" type="priority" x="250.00" y="50.00" incLanes="aud_to_g2_0" intLanes="" shape="240.00,45.00 260.00,45.00 260.00,55.00 240.00,55.00"/>
+    <junction id="gate_3_node" type="priority" x="380.00" y="200.00" incLanes="aud_to_g3_0" intLanes="" shape="375.00,195.00 385.00,195.00 385.00,205.00 375.00,205.00"/>
+    <junction id="gate_4_node" type="priority" x="120.00" y="200.00" incLanes="aud_to_g4_0" intLanes="" shape="115.00,195.00 125.00,195.00 125.00,205.00 115.00,205.00"/>
+
+    <!-- External Exits & Road 17 Endpoints -->
+    <junction id="hospital_junction" type="priority" x="480.00" y="320.00" incLanes="road_17_0" intLanes="" shape="475.00,315.00 485.00,315.00 485.00,325.00 475.00,325.00"/>
+    <junction id="metro_station_node" type="priority" x="250.00" y="0.00" incLanes="metro_blvd_0" intLanes="" shape="240.00,0.00 260.00,0.00"/>
+    <junction id="assembly_area_node" type="priority" x="250.00" y="-80.00" incLanes="assembly_connector_0" intLanes="" shape="230.00,-85.00 270.00,-85.00 270.00,-75.00 230.00,-75.00"/>
+    <junction id="accessible_transit_node" type="priority" x="50.00" y="200.00" incLanes="ramp_stepfree_0" intLanes="" shape="45.00,195.00 55.00,195.00"/>
+
+    <!-- Edges: Internal Auditorium Exits -->
+    <edge id="aud_to_g1" from="auditorium_center" to="gate_1_node" priority="2">
+        <lane id="aud_to_g1_0" index="0" allow="pedestrian" speed="1.34" length="120.00" width="6.00" shape="250.00,200.00 250.00,320.00"/>
+    </edge>
+    <edge id="aud_to_g2" from="auditorium_center" to="gate_2_node" priority="3">
+        <lane id="aud_to_g2_0" index="0" allow="pedestrian" speed="1.34" length="150.00" width="12.00" shape="250.00,200.00 250.00,50.00"/>
+    </edge>
+    <edge id="aud_to_g3" from="auditorium_center" to="gate_3_node" priority="2">
+        <lane id="aud_to_g3_0" index="0" allow="pedestrian" speed="1.34" length="130.00" width="5.00" shape="250.00,200.00 380.00,200.00"/>
+    </edge>
+    <edge id="aud_to_g4" from="auditorium_center" to="gate_4_node" priority="2">
+        <lane id="aud_to_g4_0" index="0" allow="pedestrian" speed="0.85" length="130.00" width="4.50" shape="250.00,200.00 120.00,200.00"/>
+    </edge>
+
+    <!-- Edge: Road 17 (Emergency Medical Corridor) -->
+    <edge id="road_17" from="gate_1_node" to="hospital_junction" priority="4">
+        <lane id="road_17_0" index="0" allow="emergency passenger pedestrian" speed="11.11" length="230.00" width="7.00" shape="250.00,320.00 480.00,320.00"/>
+    </edge>
+
+    <!-- Edge: Metro Boulevard -->
+    <edge id="metro_blvd" from="gate_2_node" to="metro_station_node" priority="3">
+        <lane id="metro_blvd_0" index="0" allow="pedestrian" speed="1.34" length="50.00" width="15.00" shape="250.00,50.00 250.00,0.00"/>
+    </edge>
+
+    <!-- Edge: Assembly Area Concourse -->
+    <edge id="assembly_connector" from="metro_station_node" to="assembly_area_node" priority="3">
+        <lane id="assembly_connector_0" index="0" allow="pedestrian" speed="1.34" length="80.00" width="20.00" shape="250.00,0.00 250.00,-80.00"/>
+    </edge>
+
+    <!-- Edge: Step-Free Ramp -->
+    <edge id="ramp_stepfree" from="gate_4_node" to="accessible_transit_node" priority="2">
+        <lane id="ramp_stepfree_0" index="0" allow="pedestrian" speed="0.85" length="70.00" width="4.00" shape="120.00,200.00 50.00,200.00"/>
+    </edge>
+</net>

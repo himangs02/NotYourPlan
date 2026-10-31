@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SUMO Pedestrian & Vehicle Flow Definitions for EventFlow -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <!-- VTypes for different modeled groups -->
+    <vType id="general_pedestrian" vClass="pedestrian" speedDev="0.2" length="0.30" minGap="0.50" maxSpeed="1.34"/>
+    <vType id="mobility_impaired_pedestrian" vClass="pedestrian" speedDev="0.1" length="0.80" minGap="1.00" maxSpeed="0.85"/>
+    <vType id="ambulance_emergency" vClass="emergency" length="6.50" minGap="2.50" maxSpeed="11.11" color="red"/>
+
+    <!-- Routes -->
+    <route id="route_gate2_metro" edges="aud_to_g2 metro_blvd"/>
+    <route id="route_gate1_road17" edges="aud_to_g1 road_17"/>
+    <route id="route_gate4_accessible" edges="aud_to_g4 ramp_stepfree"/>
+    <route id="route_emergency_ambulance" edges="road_17"/>
+
+    <!-- Synthetic Modeled Flows (3,000 attendees) -->
+    <!-- General crowd flow toward Gate 2 Metro Boulevard -->
+    <personFlow id="crowd_zone_b" begin="0" end="600" number="1200" type="general_pedestrian">
+        <walk from="aud_to_g2" to="metro_blvd"/>
+    </personFlow>
+
+    <!-- General crowd flow toward Gate 1 -->
+    <personFlow id="crowd_zone_a" begin="0" end="600" number="1000" type="general_pedestrian">
+        <walk from="aud_to_g1" to="road_17"/>
+    </personFlow>
+
+    <!-- Mobility-impaired group via dedicated step-free route -->
+    <personFlow id="crowd_mobility_impaired" begin="0" end="500" number="240" type="mobility_impaired_pedestrian">
+        <walk from="aud_to_g4" to="ramp_stepfree"/>
+    </personFlow>
+
+    <!-- Scheduled Emergency Response Vehicle on Road 17 -->
+    <flow id="ambulance_check" begin="180" end="240" number="1" type="ambulance_emergency">
+        <route edges="road_17"/>
+    </flow>
+</routes>

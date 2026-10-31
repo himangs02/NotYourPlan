@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # YugabyteDB System of Record (YSQL / PostgreSQL compatible)
+  yugabyte:
+    image: yugabytedb/yugabyte:latest
+    container_name: eventflow-yugabyte
+    command: bin/yugabyted start --base_dir=/home/yugabyte/yb_data --daemon=false
+    ports:
+      - "5433:5433" # YSQL PostgreSQL port
+      - "7000:7000" # Master Web UI
+      - "9000:9000" # TServer Web UI
+      - "15433:15433" # YSQL Web UI
+    environment:
+      - YB_ENV=DEV
+    volumes:
+      - yb_data:/home/yugabyte/yb_data
+    healthcheck:
+      test: ["CMD-SHELL", "/home/yugabyte/bin/ysqlsh -h localhost -p 5433 -U yugabyte -c 'SELECT 1;' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # EventFlow FastAPI Simulation & Decision Support Backend
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: eventflow-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://yugabyte:yugabyte@yugabyte:5433/yugabyte
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - MEKO_API_KEY=${MEKO_API_KEY:-}
+      - MEKO_ENDPOINT=${MEKO_ENDPOINT:-}
+      - SUMO_BINARY=sumo
+    depends_on:
+      yugabyte:
+        condition: service_healthy
+    volumes:
+      - ./sumo:/app/sumo
+
+  # EventFlow Next.js Web Command Center
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: eventflow-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  yb_data:
