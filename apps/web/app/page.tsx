@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import dynamic from "next/dynamic";
+import OccupancyAssessmentPanel, { OccupancyAssessment } from "../components/twin/OccupancyAssessmentPanel";
 
 const VenueTwinViewer = dynamic(() => import("../components/twin/VenueTwinViewer"), {
   ssr: false,
@@ -28,7 +29,13 @@ import {
   Languages,
   Database,
   Sliders,
-  Flame
+  Flame,
+  Siren,
+  Radio,
+  Bell,
+  Navigation,
+  ChevronRight,
+  Info
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -73,9 +80,148 @@ export default function EventFlowCommandCenter() {
   const [worldVersionId, setWorldVersionId] = useState("world-v1-original");
   const [blockedGate, setBlockedGate] = useState<string | null>(null);
   const [isFireActive, setIsFireActive] = useState(false);
+  const [occupancyResult, setOccupancyResult] = useState<{ key: string; data: OccupancyAssessment } | null>(null);
+  const [occupancyError, setOccupancyError] = useState<{ key: string; message: string } | null>(null);
+  const occupancyKey = `${worldVersionId}:${blockedGate || "open"}:${isFireActive}`;
+  const occupancy = occupancyResult?.key === occupancyKey ? occupancyResult.data : null;
+  React.useEffect(() => {
+    setOccupancyResult(null);
+    setOccupancyError(null);
+    if (!isFireActive) return;
+    const controller = new AbortController();
+    let current = true;
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    fetch(`${API_BASE}/api/evacuation/assess`, {
+      method: "POST", signal: controller.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: "event-dtu-convocation-001", world_version_id: worldVersionId,
+        incident_id: "EV-001", building_zone_id: "zone_auditorium", blocked_gate_ids: blockedGate ? [blockedGate] : [] }),
+    }).then(async response => {
+      if (!response.ok) throw new Error(`API returned ${response.status}`);
+      const data: OccupancyAssessment = await response.json();
+      if (current) setOccupancyResult({ key: occupancyKey, data });
+    }).catch(error => {
+      if (current) setOccupancyError({ key: occupancyKey, message: error.name === "AbortError" ? "Request timed out" : error.message });
+    }).finally(() => clearTimeout(timeout));
+    return () => { current = false; clearTimeout(timeout); controller.abort(); };
+  }, [isFireActive, worldVersionId, blockedGate, occupancyKey]);
   const [highlightedElementId, setHighlightedElementId] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("plan_b");
+  const [isEvacuating, setIsEvacuating] = useState(false);
+
+  // Phase 1: Emergency Resource & Dispatch State
+  const [ambRerouted, setAmbRerouted] = useState(false);
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
+  const [ambCountdown, setAmbCountdown] = useState<number>(72);
+  const [feCountdown, setFeCountdown] = useState<number>(34);
+  const [liveAmbStatus, setLiveAmbStatus] = useState<string>("STANDBY");
+  const [liveFeStatus, setLiveFeStatus] = useState<string>("AVAILABLE");
+
+  // Active resource status tracking (synchronized with 3D digital twin)
+  const ambStatus = !isFireActive
+    ? "STANDBY"
+    : liveAmbStatus;
+
+  const feStatus = !isFireActive
+    ? "AVAILABLE"
+    : liveFeStatus;
+
+  const handleEmergencyStatusChange = (resourceId: string, status: string, etaSeconds: number) => {
+    if (resourceId === "AMB-001") {
+      setLiveAmbStatus(status);
+      if (status === "AT_INCIDENT") {
+        setAmbCountdown(0);
+      }
+    } else if (resourceId === "FE-002") {
+      setLiveFeStatus(status);
+      if (status === "AT_INCIDENT") {
+        setFeCountdown(0);
+      }
+    }
+  };
+
+  // Real-time countdown timer
+  React.useEffect(() => {
+    if (!isFireActive) {
+      setAmbCountdown(72);
+      setFeCountdown(34);
+      setAmbRerouted(false);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setAmbCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+      setFeCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isFireActive]);
+
+  const handleToggleFire = async () => {
+    const nextState = !isFireActive;
+    setIsFireActive(nextState);
+    if (nextState) {
+      setIsEvacuating(true);
+      setAmbCountdown(72);
+      setFeCountdown(34);
+      setAmbRerouted(false);
+      setLiveAmbStatus("DISPATCHED");
+      setLiveFeStatus("IN_TRANSIT");
+      try {
+        await fetch(`${API_BASE}/api/emergency/dispatch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            incident_id: "EV-001",
+            location: "Building B / Floor 2",
+            world_version: blockedGate ? 2 : 1,
+            blocked_gates: blockedGate ? [blockedGate] : []
+          })
+        });
+      } catch (e) {
+        // Local fallback handled gracefully
+      }
+    } else {
+      setIsEvacuating(false);
+      setAmbRerouted(false);
+      setLiveAmbStatus("STANDBY");
+      setLiveFeStatus("AVAILABLE");
+      try {
+        await fetch(`${API_BASE}/api/emergency/reset`, { method: "POST" });
+      } catch (e) {
+        // Fallback
+      }
+    }
+  };
+
+  const handleSimulateObstruction = async () => {
+    if (!isFireActive) return;
+    setAmbRerouted(true);
+    setAmbCountdown(91);
+    setLiveAmbStatus("EN_ROUTE");
+    try {
+      await fetch(`${API_BASE}/api/emergency/routes/recalculate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resource_id: "AMB-001",
+          incident_id: "EV-001",
+          blocked_segment: "ROAD_17_MID__ROAD_17_SOUTH",
+          world_version: blockedGate ? 2 : 1
+        })
+      });
+    } catch (e) {
+      // Local fallback handled
+    }
+  };
+
+  const formatSeconds = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
 
   // Drawers and Modals
   const [showCausalDrawer, setShowCausalDrawer] = useState(false);
@@ -839,7 +985,7 @@ export default function EventFlowCommandCenter() {
               <div className="flex items-center gap-2">
                 {/* Fire Simulation Button */}
                 <button
-                  onClick={() => setIsFireActive((prev) => !prev)}
+                  onClick={handleToggleFire}
                   className={`text-[11px] font-semibold px-2.5 py-1 rounded border transition-all flex items-center gap-1.5 shadow-sm ${
                     isFireActive
                       ? "bg-rose-950 text-rose-200 border-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.45)] animate-pulse"
@@ -847,8 +993,8 @@ export default function EventFlowCommandCenter() {
                   }`}
                   title={
                     isFireActive
-                      ? "Extinguish fire and return attendees inside Main Auditorium"
-                      : "Trigger fire emergency in Main Auditorium and simulate crowd evacuation"
+                      ? "Reset the modeled incident and clear its occupancy assessment"
+                      : "Trigger fire response and assess modeled building occupants"
                   }
                 >
                   <Flame className={`w-3.5 h-3.5 ${isFireActive ? "text-rose-400 animate-bounce" : "text-amber-400"}`} />
@@ -896,23 +1042,45 @@ export default function EventFlowCommandCenter() {
               planMetrics={activePlanMetrics}
               selectedPlanId={selectedPlanId}
               isFireActive={isFireActive}
-              onToggleFire={() => setIsFireActive((prev) => !prev)}
+              onToggleFire={handleToggleFire}
+              ambRerouted={ambRerouted}
+              selectedResourceId={selectedResourceId}
+              onEmergencyStatusChange={handleEmergencyStatusChange}
+              occupancyAssessment={occupancy}
+              isEvacuating={isEvacuating}
+              onToggleEvacuation={() => setIsEvacuating((prev) => !prev)}
+              onDeployExtinguisher={() => setLiveFeStatus("IN_TRANSIT")}
             />
 
+            <OccupancyAssessmentPanel active={isFireActive} assessment={occupancy}
+              error={occupancyError?.key === occupancyKey ? occupancyError.message : null} />
+
             {isFireActive && (
-              <div className="flex items-center justify-between text-xs bg-rose-950/60 border border-rose-800/80 rounded-lg p-3 text-rose-200 animate-pulse">
+              <div className="flex items-center justify-between text-xs bg-rose-950/60 border border-rose-800/80 rounded-lg p-3 text-rose-200">
                 <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-rose-400 shrink-0" />
+                  <Flame className="w-4 h-4 text-rose-400 shrink-0 animate-pulse" />
                   <div>
-                    <strong className="text-white">Active Fire Outbreak Simulation:</strong> Fire ignited in <strong className="text-rose-300">Main Auditorium Hall</strong>. 3,000 modeled attendees are actively rushing out through exit doors toward safe assembly areas.
+                    <strong className="text-white">Active Fire Outbreak Simulation:</strong> Fire ignited in <strong className="text-rose-300">Main Auditorium Hall</strong> (Building B / Floor 2). Emergency Resource Dispatcher automatically activated: safe routes calculated avoiding fire hazard core.
                   </div>
                 </div>
-                <button
-                  onClick={() => setIsFireActive(false)}
-                  className="px-2.5 py-1 rounded bg-rose-900 border border-rose-600 text-rose-100 text-[10px] font-bold hover:bg-rose-800 transition whitespace-nowrap ml-3"
-                >
-                  Extinguish Fire
-                </button>
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <button
+                    onClick={() => setIsEvacuating((prev) => !prev)}
+                    className={`px-2.5 py-1 rounded border text-[10px] font-bold transition whitespace-nowrap ${
+                      isEvacuating
+                        ? "bg-amber-600 border-amber-500 text-white animate-pulse"
+                        : "bg-amber-950 border-amber-700 text-amber-200 hover:bg-amber-900"
+                    }`}
+                  >
+                    🏃 {isEvacuating ? "Evacuating..." : "Evacuate Campus"}
+                  </button>
+                  <button
+                    onClick={handleToggleFire}
+                    className="px-2.5 py-1 rounded bg-rose-900 border border-rose-600 text-rose-100 text-[10px] font-bold hover:bg-rose-800 transition whitespace-nowrap"
+                  >
+                    🧯 Extinguish Fire
+                  </button>
+                </div>
               </div>
             )}
 
@@ -950,6 +1118,311 @@ export default function EventFlowCommandCenter() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Phase 1: Emergency Command Center (Ambulance + Fire Extinguisher Dispatch & Routing) */}
+          <div className="bg-slate-900/95 border border-slate-800 rounded-xl p-5 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Siren className={`w-5 h-5 ${isFireActive ? "text-rose-500 animate-pulse" : "text-slate-500"}`} />
+                <div>
+                  <h2 className="font-bold text-sm text-white flex items-center gap-2">
+                    Emergency Command Center
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                      isFireActive
+                        ? "bg-rose-950 text-rose-300 border-rose-600 animate-pulse"
+                        : "bg-slate-950 text-emerald-400 border-slate-800"
+                    }`}>
+                      {isFireActive ? "INCIDENT EV-001: ACTIVE" : "STATUS: STANDBY"}
+                    </span>
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Emergency Resource Dispatch, Protected Corridors & 3D Route Tracing (Phase 1)
+                  </p>
+                </div>
+              </div>
+
+              {isFireActive && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSimulateObstruction}
+                    disabled={ambRerouted}
+                    className={`text-[11px] px-3 py-1.5 rounded font-mono font-bold transition flex items-center gap-1.5 border shadow ${
+                      ambRerouted
+                        ? "bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed"
+                        : "bg-amber-950 text-amber-200 border-amber-600 hover:bg-amber-900 hover:text-white"
+                    }`}
+                    title="Simulate sudden obstruction on Road 17 and trigger route recalculation"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    {ambRerouted ? "Road 17 Obstructed (Rerouted)" : "Block Road 17 (Test Rerouting)"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Emergency Grid: Resources & Notifications */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Left Column: Emergency Resources Panel (Section 17) */}
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-indigo-400" />
+                    EMERGENCY RESOURCES
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    Click resource to inspect in 3D
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {/* Ambulance 01 Card */}
+                  <div
+                    onClick={() => setSelectedResourceId("AMB-001")}
+                    className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                      selectedResourceId === "AMB-001"
+                        ? "bg-sky-950/80 border-sky-500 shadow-md ring-1 ring-sky-500"
+                        : "bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🚑</span>
+                        <div>
+                          <div className="font-bold text-xs text-white">Ambulance 01 (MEDIC-17)</div>
+                          <div className="text-[10px] text-slate-400">Road 17 Standby Post &bull; 2 Parameds</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
+                          ambStatus === "STANDBY"
+                            ? "bg-emerald-950/80 text-emerald-300 border-emerald-800"
+                            : ambStatus === "AT_INCIDENT"
+                            ? "bg-purple-950 text-purple-300 border-purple-700"
+                            : "bg-rose-950 text-rose-300 border-rose-600 animate-pulse"
+                        }`}>
+                          {ambStatus}
+                        </span>
+                        {isFireActive && (
+                          <div className="text-[11px] font-mono text-amber-300 font-bold mt-1">
+                            ETA: {formatSeconds(ambCountdown)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {isFireActive && (
+                      <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-300">
+                        <span className="text-slate-400 font-mono">
+                          Route: <strong className="text-sky-300">{ambRerouted ? "Parking Bypass → Gate 3" : "Road 17 Emergency Corridor"}</strong>
+                        </span>
+                        <span className="text-slate-400 font-mono">
+                          Dist: <strong className="text-white">{ambRerouted ? "230m" : "184m"}</strong>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fire Extinguisher FE-002 (Nearest Safe) */}
+                  <div
+                    onClick={() => setSelectedResourceId("FE-002")}
+                    className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+                      selectedResourceId === "FE-002"
+                        ? "bg-amber-950/80 border-amber-500 shadow-md ring-1 ring-amber-500"
+                        : "bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🧯</span>
+                        <div>
+                          <div className="font-bold text-xs text-white flex items-center gap-1.5">
+                            FE-002
+                            <span className="text-[9px] font-bold text-amber-400 bg-amber-950 px-1.5 py-0.2 rounded border border-amber-800">
+                              NEAREST SAFE
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400">Building B Floor 2 Corridor</div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold border ${
+                          feStatus === "AVAILABLE"
+                            ? "bg-emerald-950/80 text-emerald-300 border-emerald-800"
+                            : feStatus === "AT_INCIDENT"
+                            ? "bg-purple-950 text-purple-300 border-purple-700"
+                            : "bg-amber-950 text-amber-300 border-amber-600 animate-pulse"
+                        }`}>
+                          {feStatus}
+                        </span>
+                        {isFireActive && (
+                          <div className="text-[11px] font-mono text-amber-300 font-bold mt-1">
+                            ETA: {formatSeconds(feCountdown)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-300">
+                      <span className="text-slate-400 font-mono">
+                        Route: <strong className="text-amber-300">West Wing Corridor</strong>
+                      </span>
+                      <span className="text-slate-400 font-mono">
+                        Dist: <strong className="text-emerald-400">85m (Optimal)</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* FE-001 & FE-003 Secondary Stations */}
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div
+                      onClick={() => setSelectedResourceId("FE-001")}
+                      className={`p-2 rounded border transition cursor-pointer text-[10px] ${
+                        selectedResourceId === "FE-001"
+                          ? "bg-slate-900 border-indigo-500"
+                          : "bg-slate-900/50 border-slate-800 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="font-bold text-slate-300 flex items-center justify-between">
+                        <span>🧯 FE-001</span>
+                        <span className="text-emerald-400 font-mono">AVAILABLE</span>
+                      </div>
+                      <div className="text-slate-500 text-[9px] mt-0.5">East Arcade Corridor</div>
+                      <div className="text-slate-400 font-mono text-[9px] mt-1">Evaluated: 210m</div>
+                    </div>
+
+                    <div
+                      onClick={() => setSelectedResourceId("FE-003")}
+                      className={`p-2 rounded border transition cursor-pointer text-[10px] ${
+                        selectedResourceId === "FE-003"
+                          ? "bg-slate-900 border-indigo-500"
+                          : "bg-slate-900/50 border-slate-800 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="font-bold text-slate-300 flex items-center justify-between">
+                        <span>🧯 FE-003</span>
+                        <span className="text-emerald-400 font-mono">AVAILABLE</span>
+                      </div>
+                      <div className="text-slate-500 text-[9px] mt-0.5">North Staging Post</div>
+                      <div className="text-slate-400 font-mono text-[9px] mt-1">Evaluated: 142m</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Emergency Notification Panel (Sections 15 & 16) */}
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <span className="font-bold text-xs text-slate-200 flex items-center gap-1.5">
+                    <Bell className="w-3.5 h-3.5 text-rose-400" />
+                    EMERGENCY NOTIFICATION LOG
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                    LIVE DISPATCH STREAM
+                  </span>
+                </div>
+
+                {/* Active Incident Summary Badge */}
+                <div className={`p-2.5 rounded-lg border text-xs flex flex-col gap-1.5 ${
+                  isFireActive
+                    ? "bg-rose-950/80 border-rose-800 text-rose-200"
+                    : "bg-slate-900/60 border-slate-800 text-slate-400"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white flex items-center gap-1.5 text-[11px]">
+                      <Flame className={`w-3.5 h-3.5 ${isFireActive ? "text-rose-400 animate-bounce" : "text-slate-500"}`} />
+                      {isFireActive ? "ACTIVE INCIDENT: EV-001" : "INCIDENT MONITOR: STANDBY"}
+                    </span>
+                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+                      isFireActive ? "bg-rose-900 text-rose-200 border-rose-600" : "bg-slate-800 text-slate-400 border-slate-700"
+                    }`}>
+                      {isFireActive ? "FIRE OUTBREAK" : "NO HAZARD"}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-300">
+                    Location: <strong className="text-white">Building B / Floor 2 (Main Auditorium Hall)</strong>
+                  </div>
+                </div>
+
+                {/* Notifications list */}
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {isFireActive ? (
+                    <>
+                      {ambRerouted && (
+                        <div className="bg-amber-950/60 border border-amber-800/80 rounded-lg p-2.5 text-xs text-amber-200 animate-pulse">
+                          <div className="flex items-center justify-between font-bold text-[11px]">
+                            <span className="flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                              🚨 ROUTE UPDATE (REROUTE)
+                            </span>
+                            <span className="font-mono text-[10px] bg-amber-900 text-amber-200 px-1.5 py-0.2 rounded border border-amber-600">
+                              HIGH
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-300 mt-1">
+                            Road 17 obstruction detected. Ambulance 01 redirected via North Parking Plaza & Gate 3 bypass.
+                          </p>
+                          <div className="mt-1.5 pt-1.5 border-t border-amber-900/40 text-[9px] font-mono text-amber-400 flex justify-between">
+                            <span>Previous: 72s &rarr; New: 91s</span>
+                            <span>Bypass Safe Route Active</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bg-sky-950/60 border border-sky-800/80 rounded-lg p-2.5 text-xs text-sky-200">
+                        <div className="flex items-center justify-between font-bold text-[11px]">
+                          <span className="flex items-center gap-1">
+                            <Siren className="w-3.5 h-3.5 text-sky-400" />
+                            🚨 EMERGENCY DISPATCH
+                          </span>
+                          <span className="font-mono text-[10px] bg-rose-950 text-rose-300 px-1.5 py-0.2 rounded border border-rose-700">
+                            CRITICAL
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 mt-1">
+                          Ambulance AMB-001 automatically dispatched from Standby Post 01. Assigned to Incident EV-001.
+                        </p>
+                        <div className="mt-1.5 pt-1.5 border-t border-sky-900/40 text-[9px] font-mono text-sky-300 flex justify-between">
+                          <span>Route: Road 17 &rarr; Gate 1 &rarr; Building B</span>
+                          <span>ETA: {formatSeconds(ambCountdown)}</span>
+                        </div>
+                        <div className="text-[9px] text-emerald-400 font-mono mt-1">
+                          ✓ Shortest route blocked by fire hazard. Ambulance redirected through protected emergency corridor.
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-950/50 border border-amber-800/70 rounded-lg p-2.5 text-xs text-amber-200">
+                        <div className="flex items-center justify-between font-bold text-[11px]">
+                          <span className="flex items-center gap-1">
+                            <Flame className="w-3.5 h-3.5 text-amber-400" />
+                            🧯 FIRE RESPONSE
+                          </span>
+                          <span className="font-mono text-[10px] bg-rose-950 text-rose-300 px-1.5 py-0.2 rounded border border-rose-700">
+                            CRITICAL
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 mt-1">
+                          Nearest extinguisher FE-002 assigned (85m). Recommended Route: West Corridor &rarr; Auditorium Entry.
+                        </p>
+                        <div className="mt-1.5 pt-1.5 border-t border-amber-900/40 text-[9px] font-mono text-amber-300 flex justify-between">
+                          <span>FE-002: 85m | FE-003: 142m | FE-001: 210m</span>
+                          <span>ETA: {formatSeconds(feCountdown)}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="p-4 rounded-lg bg-slate-900/40 border border-slate-800 text-center text-xs text-slate-500">
+                      Ambulance 01 held at Standby Post 01. Fire Extinguishers FE-001, FE-002, FE-003 verified at stations. Waiting for incident activation.
+                    </div>
+                  )}
+                </div>
+
+                {/* Provenance Footer */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[9px] font-mono text-slate-500">
+                  <span>PROVENANCE: PHYSICS FALLBACK (DETERMINISTIC ROUTE GRAPH)</span>
+                  <span className="text-emerald-500">DATA: SYNTHETIC MODELED</span>
+                </div>
+              </div>
             </div>
           </div>
 

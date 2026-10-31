@@ -24,8 +24,18 @@ from db.database import (
     EvaluationModel,
     DecisionModel,
     ActionPlanModel,
-    MekoContextModel
+    MekoContextModel,
+    EmergencyResourceModel,
+    EmergencyIncidentModel,
+    EmergencyDispatchModel,
+    EmergencyRouteModel,
+    EmergencyNotificationModel
 )
+from services.emergency.routing_engine import (
+    EMERGENCY_DISPATCHER,
+    DEFAULT_EMERGENCY_RESOURCES
+)
+
 from db.seeds.venue_data import CAMPUS_VENUE_SNAPSHOT, DEFAULT_CANDIDATE_PLANS
 from packages.schemas.models import (
     CandidatePlan,
@@ -46,6 +56,23 @@ app = FastAPI(
     description="Crowd-management simulation and decision-support engine using SUMO, YugabyteDB, Meko, and Gemini.",
     version="1.0.0"
 )
+
+from services.evacuation.assessment import (
+    OccupancyAssessmentRequest, OccupancyAssessment, assess_occupancy,
+)
+
+
+@app.post("/api/evacuation/assess", response_model=OccupancyAssessment)
+def assess_building_occupancy(req: OccupancyAssessmentRequest, db: Session = Depends(get_db)):
+    world = db.query(WorldVersionModel).filter_by(
+        world_version_id=req.world_version_id, event_id=req.event_id,
+    ).first()
+    if world is None:
+        raise HTTPException(status_code=404, detail="World version not found for this event")
+    try:
+        return assess_occupancy(req, world.world_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,10 +169,43 @@ def on_startup():
             )
 
             db.commit()
+
+        # Seed default emergency resources if empty
+        existing_res = db.query(EmergencyResourceModel).first()
+        if not existing_res:
+            for r in DEFAULT_EMERGENCY_RESOURCES:
+                db_res = EmergencyResourceModel(
+                    id=r["id"],
+                    type=r["type"],
+                    name=r["name"],
+                    status=r["status"],
+                    location=r["location"],
+                    building=r.get("building"),
+                    floor=r.get("floor"),
+                    availability=r.get("availability", "AVAILABLE"),
+                    capacity=r.get("capacity"),
+                    coordinates=r.get("coordinates"),
+                    last_updated=datetime.utcnow()
+                )
+                db.add(db_res)
+            db.commit()
     finally:
         db.close()
 
 # Request Models
+class EmergencyDispatchRequest(BaseModel):
+    incident_id: str = "EV-001"
+    location: str = "Building B / Floor 2"
+    world_version: int = 1
+    blocked_gates: Optional[List[str]] = Field(default_factory=list)
+    blocked_segments: Optional[List[str]] = Field(default_factory=list)
+
+class EmergencyRerouteRequest(BaseModel):
+    resource_id: str
+    incident_id: str = "EV-001"
+    blocked_segment: str
+    world_version: int = 1
+
 class CreateEventRequest(BaseModel):
     name: str = "College Auditorium Final Show"
     venue_name: str = "DTU Convocation Hall"
@@ -740,3 +800,240 @@ def record_meko_handoff(req: MekoHandoffRequest, db: Session = Depends(get_db)):
         notes=req.notes or ""
     )
     return res
+
+# =============================================================================
+# Phase 1: Emergency Resource & Routing Endpoints
+# =============================================================================
+
+@app.get("/api/emergency/resources")
+def get_emergency_resources(db: Session = Depends(get_db)):
+    """Returns all emergency resources (Ambulance, Fire Extinguishers)."""
+    db_resources = db.query(EmergencyResourceModel).all()
+    if db_resources:
+        return [
+            {
+                "id": r.id,
+                "type": r.type,
+                "name": r.name,
+                "status": r.status,
+                "location": r.location,
+                "building": r.building,
+                "floor": r.floor,
+                "availability": r.availability,
+                "capacity": r.capacity,
+                "assigned_incident": r.assigned_incident,
+                "current_route": r.current_route,
+                "destination": r.destination,
+                "eta": r.eta,
+                "coordinates": r.coordinates,
+                "last_updated": r.last_updated.isoformat() if r.last_updated else None
+            }
+            for r in db_resources
+        ]
+    return EMERGENCY_DISPATCHER.get_all_resources()
+
+@app.get("/api/emergency/resources/{resource_id}")
+def get_emergency_resource(resource_id: str, db: Session = Depends(get_db)):
+    """Returns specific emergency resource details."""
+    db_res = db.query(EmergencyResourceModel).filter_by(id=resource_id).first()
+    if db_res:
+        return {
+            "id": db_res.id,
+            "type": db_res.type,
+            "name": db_res.name,
+            "status": db_res.status,
+            "location": db_res.location,
+            "building": db_res.building,
+            "floor": db_res.floor,
+            "availability": db_res.availability,
+            "capacity": db_res.capacity,
+            "assigned_incident": db_res.assigned_incident,
+            "current_route": db_res.current_route,
+            "destination": db_res.destination,
+            "eta": db_res.eta,
+            "coordinates": db_res.coordinates,
+            "last_updated": db_res.last_updated.isoformat() if db_res.last_updated else None
+        }
+    res = EMERGENCY_DISPATCHER.get_resource(resource_id)
+    if not res:
+        raise HTTPException(status_code=404, detail=f"Emergency resource {resource_id} not found.")
+    return res
+
+@app.post("/api/emergency/dispatch")
+def dispatch_emergency(req: EmergencyDispatchRequest, db: Session = Depends(get_db)):
+    """
+    Triggers automatic emergency dispatch for an active fire incident.
+    Calculates safe routes, assigns nearest ambulance and fire extinguisher,
+    persists in DB, and generates notifications.
+    """
+    dispatch_result = EMERGENCY_DISPATCHER.dispatch_for_fire_incident(
+        incident_id=req.incident_id,
+        location_label=req.location,
+        world_version=req.world_version,
+        blocked_gates=req.blocked_gates,
+        blocked_segments=req.blocked_segments
+    )
+
+    # Persist in DB
+    try:
+        inc_data = dispatch_result["incident"]
+        db_inc = db.query(EmergencyIncidentModel).filter_by(incident_id=inc_data["id"]).first()
+        if not db_inc:
+            db_inc = EmergencyIncidentModel(
+                incident_id=inc_data["id"],
+                type=inc_data["type"],
+                location=inc_data["location"],
+                building=inc_data["building"],
+                floor=inc_data["floor"],
+                status=inc_data["status"],
+                coordinates={"x": 0.0, "y": 2.0, "z": 0.0},
+                hazard_radius_meters=inc_data.get("hazard_radius_meters", 14.0),
+                created_at=datetime.utcnow()
+            )
+            db.add(db_inc)
+        else:
+            db_inc.status = inc_data["status"]
+
+        for r_item in [dispatch_result.get("ambulance"), dispatch_result.get("fire_extinguisher")]:
+            if r_item:
+                db_r = db.query(EmergencyResourceModel).filter_by(id=r_item["id"]).first()
+                if db_r:
+                    db_r.status = r_item["status"]
+                    db_r.availability = r_item["availability"]
+                    db_r.assigned_incident = r_item.get("assigned_incident")
+                    db_r.current_route = r_item.get("current_route")
+                    db_r.destination = r_item.get("destination")
+                    db_r.eta = r_item.get("eta")
+                    db_r.last_updated = datetime.utcnow()
+
+        for route_info in dispatch_result.get("routes", []):
+            db_route = db.query(EmergencyRouteModel).filter_by(route_id=route_info["route_id"]).first()
+            if not db_route:
+                db_route = EmergencyRouteModel(
+                    route_id=route_info["route_id"],
+                    resource_id=route_info["resource_id"],
+                    incident_id=route_info["incident_id"],
+                    world_version=route_info.get("world_version", req.world_version),
+                    route=route_info["route"],
+                    waypoints=route_info.get("waypoints", []),
+                    distance_meters=route_info["distance_meters"],
+                    estimated_time_seconds=route_info["estimated_time_seconds"],
+                    safe=1 if route_info.get("safe", True) else 0,
+                    rejection_reason=route_info.get("rejection_reason"),
+                    provenance=route_info.get("provenance", {}),
+                    created_at=datetime.utcnow()
+                )
+                db.add(db_route)
+
+        for notif in dispatch_result.get("notifications", []):
+            db_notif = db.query(EmergencyNotificationModel).filter_by(notification_id=notif["notification_id"]).first()
+            if not db_notif:
+                db_notif = EmergencyNotificationModel(
+                    notification_id=notif["notification_id"],
+                    incident_id=notif["incident_id"],
+                    resource_id=notif["resource_id"],
+                    title=notif["title"],
+                    message=notif["message"],
+                    priority=notif["priority"],
+                    eta_seconds=notif["eta_seconds"],
+                    route_summary=notif["route_summary"],
+                    created_at=datetime.utcnow()
+                )
+                db.add(db_notif)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    return dispatch_result
+
+@app.get("/api/emergency/incidents/{incident_id}/routes")
+def get_incident_routes(incident_id: str, db: Session = Depends(get_db)):
+    """Returns active emergency routes for an incident."""
+    routes = EMERGENCY_DISPATCHER.get_routes(incident_id)
+    if not routes:
+        db_routes = db.query(EmergencyRouteModel).filter_by(incident_id=incident_id).all()
+        routes = [
+            {
+                "route_id": r.route_id,
+                "resource_id": r.resource_id,
+                "incident_id": r.incident_id,
+                "world_version": r.world_version,
+                "route": r.route,
+                "waypoints": r.waypoints,
+                "distance_meters": r.distance_meters,
+                "estimated_time_seconds": r.estimated_time_seconds,
+                "safe": bool(r.safe),
+                "rejection_reason": r.rejection_reason,
+                "provenance": r.provenance
+            }
+            for r in db_routes
+        ]
+    return routes
+
+@app.get("/api/emergency/incidents/{incident_id}/notifications")
+def get_incident_notifications(incident_id: str, db: Session = Depends(get_db)):
+    """Returns real-time emergency notifications for an incident."""
+    notifs = EMERGENCY_DISPATCHER.get_notifications(incident_id)
+    if not notifs:
+        db_notifs = db.query(EmergencyNotificationModel).filter_by(incident_id=incident_id).all()
+        notifs = [
+            {
+                "notification_id": n.notification_id,
+                "incident_id": n.incident_id,
+                "resource_id": n.resource_id,
+                "title": n.title,
+                "message": n.message,
+                "priority": n.priority,
+                "eta_seconds": n.eta_seconds,
+                "route_summary": n.route_summary,
+                "created_at": n.created_at.isoformat() if n.created_at else None
+            }
+            for n in db_notifs
+        ]
+    return notifs
+
+@app.post("/api/emergency/routes/recalculate")
+def recalculate_emergency_route(req: EmergencyRerouteRequest, db: Session = Depends(get_db)):
+    """
+    Section 19: Route Failure & Dynamic Recalculation.
+    Recalculates safe route when a segment is blocked, updates resource and issues notification.
+    """
+    res = EMERGENCY_DISPATCHER.recalculate_on_obstruction(
+        resource_id=req.resource_id,
+        incident_id=req.incident_id,
+        new_blocked_segment=req.blocked_segment,
+        world_version=req.world_version
+    )
+    return res
+
+@app.post("/api/emergency/reset")
+def reset_emergency_resources(db: Session = Depends(get_db)):
+    """Resets all resources to initial standby/available state."""
+    res = EMERGENCY_DISPATCHER.reset()
+    try:
+        for r in DEFAULT_EMERGENCY_RESOURCES:
+            db_res = db.query(EmergencyResourceModel).filter_by(id=r["id"]).first()
+            if db_res:
+                db_res.status = r["status"]
+                db_res.availability = r.get("availability", "AVAILABLE")
+                db_res.assigned_incident = None
+                db_res.current_route = None
+                db_res.destination = None
+                db_res.eta = None
+        db.commit()
+    except Exception:
+        db.rollback()
+    return res
+
+@app.get("/api/emergency/provenance")
+def get_emergency_provenance():
+    """Returns provenance and simulation mode transparency."""
+    is_sumo = simulator.is_sumo_available
+    return {
+        "engine": "SUMO LIVE" if is_sumo else "PHYSICS_FALLBACK",
+        "reason": "SUMO binary verified on system" if is_sumo else "SUMO NOT INSTALLED; RUNNING CALIBRATED DETERMINISTIC ROUTE NETWORK",
+        "data_classification": "SYNTHETIC_MODELED_DATA",
+        "safe_routing_algorithm": "Dijkstra with Emergency Priority & Fire Hazard Exclusion"
+    }
+

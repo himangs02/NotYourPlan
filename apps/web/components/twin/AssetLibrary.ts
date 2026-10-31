@@ -17,12 +17,17 @@ import {
   CROWD_FLOW_GATE2_BLOCKED_G4,
   CROWD_FLOW_STEPFREE,
   ROAD_17_CORRIDOR,
+  ANCHORS,
+  EMERGENCY_VEHICLE_SPEED,
+  EMERGENCY_RESPONDER_SPEED,
 } from "./worldAnchors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Canvas Sprite Badge Creator for Floating 3D Semantic Labels
 // ─────────────────────────────────────────────────────────────────────────────
-function createTextBadge(
+let _showLabelsGlobal = false;
+
+export function createTextBadge(
   text: string,
   bgColor: string = "rgba(15, 23, 42, 0.85)",
   borderColor: string = "#6366f1",
@@ -62,7 +67,46 @@ function createTextBadge(
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(12, 3, 1);
   sprite.renderOrder = 999;
+  sprite.userData.isSemanticBadge = true;
+  sprite.visible = _showLabelsGlobal;
   return sprite;
+}
+
+export function updateTextBadge(
+  sprite: THREE.Sprite,
+  text: string,
+  bgColor: string = "rgba(15, 23, 42, 0.85)",
+  borderColor: string = "#6366f1",
+  textColor: string = "#ffffff"
+): void {
+  const canvas = document.createElement("canvas");
+  canvas.width = 384;
+  canvas.height = 96;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  ctx.fillStyle = bgColor;
+  ctx.beginPath();
+  ctx.roundRect(6, 6, 372, 84, 20);
+  ctx.fill();
+
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = borderColor;
+  ctx.stroke();
+
+  ctx.fillStyle = textColor;
+  ctx.font = "bold 32px 'Segoe UI', system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 192, 48);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  if (sprite.material && sprite.material.map) {
+    sprite.material.map.dispose();
+    sprite.material.map = texture;
+    sprite.material.needsUpdate = true;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,15 +140,15 @@ function buildHallAttendees(count: number, gate2Blocked: boolean): AgentState[] 
 
     if (gate2Blocked) {
       if (i % 2 === 0) {
-        startDoor = new THREE.Vector3(-12.0, 1.95, 4.0); // West street exit
+        startDoor = new THREE.Vector3(-14.0, 0.22, 10.8); // West concourse exit
         waypoints = CROWD_FLOW_GATE2_BLOCKED_G4;
       } else {
-        startDoor = new THREE.Vector3(12.0, 1.95, 4.0);  // East street exit
+        startDoor = new THREE.Vector3(14.0, 0.22, 10.8);  // East concourse exit
         waypoints = CROWD_FLOW_GATE2_BLOCKED_G3;
       }
     } else {
       // Main street exit onto Food Court Concourse / Plaza
-      startDoor = new THREE.Vector3(randomBetween(-2.8, 2.8), 1.95, 12.0);
+      startDoor = new THREE.Vector3(randomBetween(-2.8, 2.8), 0.22, 11.0);
       waypoints = CROWD_FLOW_NORMAL;
     }
 
@@ -115,14 +159,14 @@ function buildHallAttendees(count: number, gate2Blocked: boolean): AgentState[] 
     const alpha = Math.random();
     const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
     pos.x += randomBetween(-1.6, 1.6);
-    pos.y = 1.95;
+    pos.y = 0.22;
 
     agents.push({
       pos,
       startDoor: startDoor.clone(),
       waypoints,
       waypointIdx: startIdx + 1,
-      speed: randomBetween(0.09, 0.15), // Visible, active emergency run speed
+      speed: randomBetween(0.12, 0.22), // Active visible emergency egress run speed
     });
   }
   return agents;
@@ -132,21 +176,21 @@ function buildHallWheelchairs(count: number): AgentState[] {
   const agents: AgentState[] = [];
   const waypoints = CROWD_FLOW_STEPFREE;
   for (let i = 0; i < count; i++) {
-    const startDoor = new THREE.Vector3(-12.0, 1.95, 4.0);
+    const startDoor = new THREE.Vector3(-14.0, 0.22, 10.8);
     const startIdx = Math.floor(Math.random() * (waypoints.length - 1));
     const p1 = waypoints[startIdx];
     const p2 = waypoints[startIdx + 1];
     const alpha = Math.random();
     const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
     pos.x += randomBetween(-0.8, 0.8);
-    pos.y = 1.95;
+    pos.y = 0.22;
 
     agents.push({
       pos,
       startDoor: startDoor.clone(),
       waypoints,
       waypointIdx: startIdx + 1,
-      speed: randomBetween(0.07, 0.11),
+      speed: randomBetween(0.09, 0.16),
     });
   }
   return agents;
@@ -402,6 +446,30 @@ function getWheelchairGeometry(r: number, g: number, b: number): THREE.BufferGeo
 }
 
 export class TwinAssetLibrary {
+  public static get showLabels(): boolean {
+    return _showLabelsGlobal;
+  }
+  public static set showLabels(val: boolean) {
+    _showLabelsGlobal = val;
+  }
+
+  public static setShowLabels(show: boolean, rootGroup?: THREE.Object3D): void {
+    _showLabelsGlobal = show;
+    if (rootGroup) {
+      rootGroup.traverse((child) => {
+        if (child.userData?.isSemanticBadge !== undefined) {
+          child.visible = show;
+        }
+      });
+    }
+  }
+
+  public static isEvacuating = false;
+  public static setEvacuationState(evacuating: boolean, gate2Blocked: boolean = false): void {
+    this.isEvacuating = evacuating;
+    ensureAgents(gate2Blocked);
+  }
+
   public static createObjectMesh(obj: SemanticWorldObject, isSelected: boolean = false): THREE.Group {
     const group = new THREE.Group();
     group.name = obj.id;
@@ -439,6 +507,9 @@ export class TwinAssetLibrary {
         break;
       case "ambulance":
         group.add(this.createAmbulance(obj, isSelected));
+        break;
+      case "fire_extinguisher":
+        group.add(this.createFireExtinguisher(obj, isSelected));
         break;
       default:
         group.add(this.createGenericBox(obj, isSelected));
@@ -905,13 +976,118 @@ export class TwinAssetLibrary {
     sirenBlue.position.set(0.52, 2.65, 1.4);
     g.add(sirenBlue);
 
-    // 9. Floating 3D Badge Pin
-    const badge = createTextBadge("🚑 MEDIC-17 (ACTIVE)", "rgba(15, 23, 42, 0.90)", "#ef4444", "#fee2e2");
+    // 9. Floating 3D Badge Pin reflecting Ambulance Status
+    const ambStatus = obj.properties?.status || "STANDBY";
+    const badgeText = ambStatus === "STANDBY"
+      ? "🚑 MEDIC-17 [STANDBY]"
+      : ambStatus === "AT_INCIDENT"
+      ? "🏥 MEDIC-17 [AT INCIDENT]"
+      : ambStatus === "EN_ROUTE"
+      ? "🚑 MEDIC-17 [EN ROUTE]"
+      : "🚨 MEDIC-17 [DISPATCHED]";
+    const badgeBg = ambStatus === "STANDBY" ? "rgba(15, 23, 42, 0.90)" : "rgba(225, 29, 72, 0.95)";
+    const badgeBorder = ambStatus === "STANDBY" ? "#38bdf8" : "#ef4444";
+    const badge = createTextBadge(badgeText, badgeBg, badgeBorder, "#fee2e2");
+    badge.name = "ambulance_status_badge";
     badge.position.set(0, 4.5, 0);
     g.add(badge);
 
     // g position is managed by the parent group at obj.position
     g.position.set(0, 0, 0);
+    return g;
+  }
+
+  private static createFireExtinguisher(obj: SemanticWorldObject, isSelected: boolean): THREE.Group {
+    const g = new THREE.Group();
+
+    // 1. Red Main Pressure Tank Cylinder
+    const tankGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.35, 16);
+    const tankMat = new THREE.MeshStandardMaterial({
+      color: 0xef4444,
+      roughness: 0.25,
+      metalness: 0.35
+    });
+    const tank = new THREE.Mesh(tankGeo, tankMat);
+    tank.position.set(0, 0.72, 0);
+    tank.castShadow = true;
+    g.add(tank);
+
+    // 2. Rounded Tank Top Dome
+    const domeGeo = new THREE.SphereGeometry(0.35, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    const dome = new THREE.Mesh(domeGeo, tankMat);
+    dome.position.set(0, 1.395, 0);
+    g.add(dome);
+
+    // 3. Black Rubber Base Stand
+    const baseGeo = new THREE.CylinderGeometry(0.39, 0.41, 0.16, 16);
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+    const base = new THREE.Mesh(baseGeo, baseMat);
+    base.position.set(0, 0.08, 0);
+    g.add(base);
+
+    // 4. White / Yellow Instruction Label Band
+    const bandGeo = new THREE.CylinderGeometry(0.355, 0.355, 0.55, 16);
+    const bandMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+    const band = new THREE.Mesh(bandGeo, bandMat);
+    band.position.set(0, 0.72, 0);
+    g.add(band);
+
+    // 5. Chrome / Brass Discharge Valve Neck
+    const neckGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.32, 12);
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, metalness: 0.85, roughness: 0.2 });
+    const neck = new THREE.Mesh(neckGeo, metalMat);
+    neck.position.set(0, 1.88, 0);
+    g.add(neck);
+
+    // 6. Squeeze Lever & Handle
+    const handleGeo = new THREE.BoxGeometry(0.12, 0.08, 0.55);
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5 });
+    const handle = new THREE.Mesh(handleGeo, handleMat);
+    handle.position.set(0, 2.05, 0.05);
+    handle.rotation.x = -0.15;
+    g.add(handle);
+
+    // 7. Pressure Gauge
+    const gaugeGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.06, 12);
+    gaugeGeo.rotateZ(Math.PI / 2);
+    const gaugeMat = new THREE.MeshStandardMaterial({ color: 0x10b981, roughness: 0.3 });
+    const gauge = new THREE.Mesh(gaugeGeo, gaugeMat);
+    gauge.position.set(0.16, 1.95, 0.12);
+    g.add(gauge);
+
+    // 8. Discharge Hose & Nozzle
+    const hoseGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.2, 8);
+    const hoseMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.8 });
+    const hose = new THREE.Mesh(hoseGeo, hoseMat);
+    hose.position.set(-0.35, 1.05, 0.12);
+    hose.rotation.z = 0.1;
+    g.add(hose);
+
+    // 9. Floating Badge Pin
+    const isAssigned = obj.properties.status === "ASSIGNED" || obj.properties.status === "IN_TRANSIT";
+    const badgeText = isAssigned
+      ? `🧯 ${obj.id} [ASSIGNED]`
+      : `🧯 ${obj.id} [AVAILABLE]`;
+    const badgeBg = isAssigned ? "rgba(225, 29, 72, 0.95)" : "rgba(15, 23, 42, 0.90)";
+    const badgeBorder = isAssigned ? "#f43f5e" : "#ef4444";
+    const badge = createTextBadge(badgeText, badgeBg, badgeBorder, "#ffffff");
+    badge.name = "extinguisher_status_badge";
+    badge.position.set(0, 2.9, 0);
+    g.add(badge);
+
+    // 10. Selection / Ground Glow Ring Indicator
+    const ringGeo = new THREE.RingGeometry(0.65, 0.85, 24);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: isSelected ? 0x6366f1 : (isAssigned ? 0xf43f5e : 0xef4444),
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: isSelected ? 0.9 : 0.65
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(0, 0.04, 0);
+    g.add(ring);
+
     return g;
   }
 
@@ -1120,6 +1296,102 @@ export class TwinAssetLibrary {
     return group;
   }
 
+  /**
+   * Creates pressurized chemical foam / CO2 mist spray cone from extinguisher nozzle to fire.
+   */
+  public static createExtinguisherSpray(origin: THREE.Vector3, target: THREE.Vector3): THREE.Group {
+    const group = new THREE.Group();
+    group.name = "fire_extinguisher_spray";
+    group.position.copy(origin);
+
+    const count = 48;
+    const foamGeo = new THREE.SphereGeometry(0.24, 6, 6);
+    const foamMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.InstancedMesh(foamGeo, foamMat, count);
+    mesh.name = "foam_particles";
+    mesh.renderOrder = 999;
+
+    const dummy = new THREE.Object3D();
+    const particles: { pos: THREE.Vector3; dir: THREE.Vector3; speed: number; scale: number; life: number }[] = [];
+
+    const dir = new THREE.Vector3().subVectors(target, origin).normalize();
+    for (let i = 0; i < count; i++) {
+      const spreadDir = dir.clone().add(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.45,
+        (Math.random() - 0.2) * 0.45,
+        (Math.random() - 0.5) * 0.45
+      )).normalize();
+
+      particles.push({
+        pos: new THREE.Vector3(0, 1.8, 0),
+        dir: spreadDir,
+        speed: randomBetween(8.0, 16.0),
+        scale: randomBetween(0.4, 1.2),
+        life: Math.random(),
+      });
+
+      dummy.position.set(0, 1.8, 0);
+      dummy.scale.setScalar(0.01);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    (mesh as any).userData = { particles, origin, target, dir };
+    group.add(mesh);
+    return group;
+  }
+
+  public static updateExtinguisherSpray(dt: number, sprayGroup: THREE.Group): void {
+    const dtSec = Math.min(dt / 1000, 0.05);
+    const mesh = sprayGroup.getObjectByName("foam_particles") as THREE.InstancedMesh;
+    if (!mesh || !(mesh as any).userData?.particles) return;
+
+    const dummy = new THREE.Object3D();
+    const { particles } = (mesh as any).userData;
+
+    particles.forEach((p: any, i: number) => {
+      p.life += dtSec * 1.8;
+      if (p.life > 1.0) {
+        p.life = 0;
+        p.pos.set(0, 1.8, 0);
+      }
+      p.pos.addScaledVector(p.dir, p.speed * dtSec);
+      dummy.position.copy(p.pos);
+      const scale = p.scale * (1.0 + p.life * 2.5);
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * Smoothly extinguishes fire when extinguisher discharge is active.
+   * Returns true when fully extinguished.
+   */
+  public static extinguishFire(dt: number, fireGroup: THREE.Group): boolean {
+    const dtSec = Math.min(dt / 1000, 0.05);
+    const fireLight = fireGroup.getObjectByName("fire_light") as THREE.PointLight;
+    if (fireLight) {
+      fireLight.intensity = Math.max(0, fireLight.intensity - dtSec * 2.5);
+    }
+    const flameMesh = fireGroup.getObjectByName("flame_mesh") as THREE.InstancedMesh;
+    if (flameMesh) {
+      flameMesh.scale.multiplyScalar(Math.max(0, 1.0 - dtSec * 0.7));
+      if (flameMesh.scale.x < 0.08) {
+        flameMesh.visible = false;
+        return true;
+      }
+    }
+    return false;
+  }
+
   public static updateFireEffect(dt: number, fireGroup: THREE.Group): void {
     const dtSec = Math.min(dt / 1000, 0.05);
     const now = performance.now();
@@ -1182,8 +1454,8 @@ export class TwinAssetLibrary {
     const dummy = new THREE.Object3D();
     const dtSec = Math.min(dt / 1000, 0.05);
 
-    if (!this._isFireActive) {
-      // PRE-FIRE STATE: People are completely HIDDEN inside the building!
+    if (!this._isFireActive && !this.isEvacuating) {
+      // PRE-FIRE / PRE-EVACUATION: People are completely HIDDEN inside the building!
       // Streets and rooftops are completely clean.
       _attendeeAgents.forEach((a, i) => {
         dummy.position.set(0, -999, 0);
@@ -1203,7 +1475,7 @@ export class TwinAssetLibrary {
       return;
     }
 
-    // FIRE ACTIVE: Attendees are FULLY VISIBLE and running out on the road towards safety!
+    // ACTIVE EVACUATION: Attendees are FULLY VISIBLE and running out towards safety!
     _attendeeAgents.forEach((a, i) => {
       const target = a.waypoints[a.waypointIdx];
       const dx = target.x - a.pos.x;
@@ -1216,14 +1488,14 @@ export class TwinAssetLibrary {
         if (a.waypointIdx >= a.waypoints.length) {
           // Wrap back to street exit to maintain a continuous, vibrant evacuation stream
           a.waypointIdx = 0;
-          a.pos.set(a.startDoor.x + randomBetween(-1.5, 1.5), 1.95, a.startDoor.z);
+          a.pos.set(a.startDoor.x + randomBetween(-1.5, 1.5), 0.22, a.startDoor.z);
         }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
 
-      dummy.position.set(a.pos.x, 1.95, a.pos.z);
+      dummy.position.set(a.pos.x, 0.22, a.pos.z);
       dummy.scale.setScalar(1.25);
       if (dist > 0.01) {
         dummy.rotation.set(0, Math.atan2(dx, dz), 0);
@@ -1245,14 +1517,14 @@ export class TwinAssetLibrary {
         a.waypointIdx++;
         if (a.waypointIdx >= a.waypoints.length) {
           a.waypointIdx = 0;
-          a.pos.set(a.startDoor.x + randomBetween(-0.8, 0.8), 1.95, a.startDoor.z);
+          a.pos.set(a.startDoor.x + randomBetween(-0.8, 0.8), 0.22, a.startDoor.z);
         }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
 
-      dummy.position.set(a.pos.x, 1.95, a.pos.z);
+      dummy.position.set(a.pos.x, 0.22, a.pos.z);
       dummy.scale.setScalar(1.25);
       if (dist > 0.01) {
         dummy.rotation.set(0, Math.atan2(dx, dz), 0);
@@ -1264,62 +1536,731 @@ export class TwinAssetLibrary {
   }
 
 
-  private static _ambWpIdx = 0;
-  private static _ambDir = 1;
-  private static _ambTimer = 0;
-
   /**
-   * Drives the emergency ambulance dynamically along the Road 17 Medical Corridor.
+   * Holds the emergency ambulance in physical standby at AMBULANCE_STANDBY_01.
+   * Zero translation, engine idling, sirens off/standby, vehicle facing forward down Road 17.
    */
-  public static updateAmbulanceAnimation(dt: number, ambGroup: THREE.Object3D): void {
-    const dtSec = Math.min(dt / 1000, 0.05);
-    const speed = 8.5; // Fast emergency transit speed (m/s)
+  public static updateAmbulanceStandby(ambGroup: THREE.Object3D): void {
+    ambGroup.position.set(ANCHORS.AMBULANCE.position.x, 0.38, ANCHORS.AMBULANCE.position.z);
+    ambGroup.rotation.set(0, 0, 0); // Vehicle points +Z along Road 17
 
-    const waypoints = ROAD_17_CORRIDOR;
-    if (!waypoints || waypoints.length === 0) return;
-
-    const currentPos = ambGroup.position;
-    const targetWp = waypoints[this._ambWpIdx];
-
-    const dx = targetWp.x - currentPos.x;
-    const dz = targetWp.z - currentPos.z;
-    const dist = Math.sqrt(dx * dx + dz * dz);
-
-    const step = speed * dtSec;
-    if (dist < step + 0.25) {
-      this._ambWpIdx += this._ambDir;
-      if (this._ambWpIdx >= waypoints.length) {
-        this._ambWpIdx = waypoints.length - 2;
-        this._ambDir = -1; // Reverse back toward medical post
-      } else if (this._ambWpIdx < 0) {
-        this._ambWpIdx = 1;
-        this._ambDir = 1; // Drive toward Gate 1 again
-      }
-    } else {
-      currentPos.x += (dx / dist) * step;
-      currentPos.z += (dz / dist) * step;
-      // Rotate vehicle heading directly forward
-      ambGroup.rotation.y = Math.atan2(dx, dz);
-    }
-
-    // Gentle vehicle suspension vibration
-    ambGroup.position.y = 1.95 + Math.sin(performance.now() * 0.015) * 0.02;
-
-    // Siren strobe flashing (alternating high-intensity red & blue pulses)
-    this._ambTimer += dtSec * 12;
     const sirenRed = ambGroup.getObjectByName("siren_red") as THREE.Mesh;
     const sirenBlue = ambGroup.getObjectByName("siren_blue") as THREE.Mesh;
-    const isRedFlash = Math.sin(this._ambTimer * 3.5) > 0;
-
     if (sirenRed) {
-      (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(isRedFlash ? 0xff1111 : 0x440000);
+      (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(0x330000);
     }
     if (sirenBlue) {
-      (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(!isRedFlash ? 0x00aaff : 0x001155);
+      (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(0x001144);
     }
   }
 
   public static resetAgents(): void {
     _agentsBuilt = false;
   }
+
+  /**
+   * Creates 3D Progressive Route Visualization with direction arrows (chevrons),
+   * traveled vs remaining paths, waypoint spheres, and start/end beacons.
+   * Section 10 & 11: Progressively revealed as vehicle advances.
+   */
+  public static createEmergencyRouteVisual(
+    waypoints: THREE.Vector3[],
+    colorHex: number = 0x06b6d4, // Cyan for ambulance, Orange (0xf97316) for extinguisher
+    routeLabel: string = "EMERGENCY ROUTE",
+    isDashed: boolean = false
+  ): THREE.Group & { updateProgress?: (progress: number, currentPos: THREE.Vector3) => void } {
+    const group = new THREE.Group() as THREE.Group & {
+      updateProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+    };
+    group.name = "emergency_route_visual_" + routeLabel;
+    if (!waypoints || waypoints.length < 2) return group;
+
+    const totalWps = waypoints.length;
+
+    // 1. Full baseline path curve for sampling and geometry
+    const curve = new THREE.CatmullRomCurve3(waypoints, false, "catmullrom", 0.05);
+    const fullPoints = curve.getPoints(Math.max(30, waypoints.length * 8));
+
+    // 2. Traveled Route (starts empty, grows with vehicle movement)
+    const traveledGeo = new THREE.BufferGeometry().setFromPoints([waypoints[0], waypoints[0]]);
+    const traveledLineMat = new THREE.LineBasicMaterial({
+      color: colorHex,
+      linewidth: 5,
+      transparent: true,
+      opacity: 0.98,
+    });
+    const traveledLine = new THREE.Line(traveledGeo, traveledLineMat);
+    traveledLine.name = "traveled_line";
+    traveledLine.position.y += 0.04;
+    group.add(traveledLine);
+
+    // Glowing traveled tube
+    const traveledTubeMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.85,
+    });
+    const initialTraveledTubeGeo = new THREE.TubeGeometry(
+      new THREE.LineCurve3(waypoints[0], waypoints[0]),
+      2,
+      0.22,
+      8,
+      false
+    );
+    const traveledTube = new THREE.Mesh(initialTraveledTubeGeo, traveledTubeMat);
+    traveledTube.name = "traveled_tube";
+    traveledTube.position.y += 0.04;
+    traveledTube.visible = false;
+    group.add(traveledTube);
+
+    // 3. Remaining Route (initially full, shrinks as vehicle advances)
+    const remainingGeo = new THREE.BufferGeometry().setFromPoints(fullPoints);
+    const remainingLineMat = new THREE.LineBasicMaterial({
+      color: colorHex,
+      linewidth: 3,
+      transparent: true,
+      opacity: isDashed ? 0.45 : 0.65,
+    });
+    const remainingLine = new THREE.Line(remainingGeo, remainingLineMat);
+    remainingLine.name = "remaining_line";
+    remainingLine.position.y += 0.04;
+    group.add(remainingLine);
+
+    // Translucent remaining tube guide
+    const remainingTubeMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: isDashed ? 0.22 : 0.35,
+      wireframe: isDashed,
+    });
+    const remainingTubeGeo = new THREE.TubeGeometry(curve, Math.max(30, waypoints.length * 6), 0.16, 8, false);
+    const remainingTube = new THREE.Mesh(remainingTubeGeo, remainingTubeMat);
+    remainingTube.name = "remaining_tube";
+    remainingTube.position.y += 0.04;
+    group.add(remainingTube);
+
+    // 4. Direction Arrows / Chevrons (Section 11: point in travel direction along road)
+    const arrowMeshes: { mesh: THREE.Mesh; dist: number }[] = [];
+    const arrowGeo = new THREE.ConeGeometry(0.35, 0.9, 4);
+    arrowGeo.rotateX(Math.PI / 2); // Cone tip faces +Z
+
+    // Compute cumulative segment distances
+    const cumDist: number[] = [0];
+    let routeLength = 0;
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      routeLength += waypoints[i].distanceTo(waypoints[i + 1]);
+      cumDist.push(routeLength);
+    }
+
+    // Place direction arrows every 4.0 - 5.5 units along the centerline
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const p1 = waypoints[i];
+      const p2 = waypoints[i + 1];
+      const segVec = new THREE.Vector3().subVectors(p2, p1);
+      const segLen = segVec.length();
+      if (segLen < 1.2) continue;
+
+      const numArrows = Math.max(1, Math.floor(segLen / 4.5));
+      const stepDist = segLen / (numArrows + 1);
+
+      for (let k = 1; k <= numArrows; k++) {
+        const t = (k * stepDist) / segLen;
+        const arrowPos = new THREE.Vector3().lerpVectors(p1, p2, t);
+        arrowPos.y = 0.44; // Flush over road surface
+
+        const arrowMat = new THREE.MeshBasicMaterial({
+          color: colorHex,
+          transparent: true,
+          opacity: 0.75,
+        });
+        const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+        arrow.position.copy(arrowPos);
+        arrow.lookAt(p2.x, 0.44, p2.z); // Points in direction of travel!
+        group.add(arrow);
+
+        const arrowDistance = cumDist[i] + k * stepDist;
+        arrowMeshes.push({ mesh: arrow, dist: arrowDistance });
+      }
+    }
+
+    // 5. Waypoint Node Spheres
+    const wpGeo = new THREE.SphereGeometry(0.38, 12, 12);
+    const wpMat = new THREE.MeshBasicMaterial({ color: colorHex });
+    waypoints.forEach((wp) => {
+      const wpMesh = new THREE.Mesh(wpGeo, wpMat);
+      wpMesh.position.set(wp.x, 0.42, wp.z);
+      group.add(wpMesh);
+    });
+
+    // 6. Start Marker Beacon Pin
+    const startPin = createTextBadge(
+      `📍 START: ${routeLabel}`,
+      "rgba(15, 23, 42, 0.90)",
+      "#38bdf8",
+      "#ffffff"
+    );
+    startPin.position.set(waypoints[0].x, 3.8, waypoints[0].z);
+    group.add(startPin);
+
+    // 7. Destination Marker Beacon Pin
+    const lastWp = waypoints[waypoints.length - 1];
+    const destPin = createTextBadge(
+      `🎯 INCIDENT TARGET`,
+      "rgba(185, 28, 28, 0.95)",
+      "#ef4444",
+      "#fee2e2"
+    );
+    destPin.position.set(lastWp.x, 4.2, lastWp.z);
+    group.add(destPin);
+
+    // 8. Dynamic Progress Update Method
+    group.updateProgress = (progress: number, currentPos: THREE.Vector3) => {
+      const clampedProgress = Math.min(1.0, Math.max(0, progress));
+      const currentDist = clampedProgress * (routeLength || 1);
+
+      // A. Update direction arrows
+      for (const item of arrowMeshes) {
+        const mat = item.mesh.material as THREE.MeshBasicMaterial;
+        if (item.dist <= currentDist + 0.3) {
+          // Traversed arrow: bright illuminated emerald/cyan
+          mat.color.setHex(0x10b981);
+          mat.opacity = 1.0;
+        } else {
+          // Ahead arrow: pulsing route color
+          mat.color.setHex(colorHex);
+          mat.opacity = 0.55;
+        }
+      }
+
+      // B. Update traveled & remaining route lines
+      // Find waypoint index closest behind current position
+      let passedIndex = 0;
+      for (let i = 0; i < cumDist.length; i++) {
+        if (cumDist[i] <= currentDist) passedIndex = i;
+        else break;
+      }
+
+      // Construct traveled points
+      const traveledPoints: THREE.Vector3[] = [];
+      for (let i = 0; i <= passedIndex && i < waypoints.length; i++) {
+        traveledPoints.push(waypoints[i].clone());
+      }
+      traveledPoints.push(new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z));
+
+      if (traveledPoints.length >= 2) {
+        traveledLine.geometry.dispose();
+        traveledLine.geometry = new THREE.BufferGeometry().setFromPoints(traveledPoints);
+        traveledLine.visible = true;
+
+        try {
+          const tCurve = new THREE.CatmullRomCurve3(traveledPoints, false, "catmullrom", 0.05);
+          traveledTube.geometry.dispose();
+          traveledTube.geometry = new THREE.TubeGeometry(
+            tCurve,
+            Math.max(4, traveledPoints.length * 4),
+            0.20,
+            8,
+            false
+          );
+          traveledTube.visible = true;
+        } catch {
+          // Fallback if points coincident
+        }
+      }
+
+      // Construct remaining points
+      const remainingPoints: THREE.Vector3[] = [new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z)];
+      for (let i = passedIndex + 1; i < waypoints.length; i++) {
+        remainingPoints.push(waypoints[i].clone());
+      }
+
+      if (remainingPoints.length >= 2 && clampedProgress < 0.99) {
+        remainingLine.geometry.dispose();
+        remainingLine.geometry = new THREE.BufferGeometry().setFromPoints(remainingPoints);
+        remainingLine.visible = true;
+
+        try {
+          const rCurve = new THREE.CatmullRomCurve3(remainingPoints, false, "catmullrom", 0.05);
+          remainingTube.geometry.dispose();
+          remainingTube.geometry = new THREE.TubeGeometry(
+            rCurve,
+            Math.max(4, remainingPoints.length * 4),
+            0.15,
+            8,
+            false
+          );
+          remainingTube.visible = true;
+        } catch {
+          // Fallback
+        }
+      } else {
+        remainingLine.visible = false;
+        remainingTube.visible = false;
+      }
+    };
+
+    return group;
+  }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AMBULANCE TIRE TRACEMARKS CONTROLLER
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class AmbulanceTireTracemarks {
+  public group: THREE.Group;
+  private _leftSegments: THREE.Vector3[] = [];
+  private _rightSegments: THREE.Vector3[] = [];
+  private _glowPoints: THREE.Vector3[] = [];
+  private _leftLine: THREE.LineSegments;
+  private _rightLine: THREE.LineSegments;
+  private _glowLine: THREE.LineSegments;
+  private _lastPos: THREE.Vector3 | null = null;
+
+  constructor() {
+    this.group = new THREE.Group();
+    this.group.name = "ambulance_tire_tracemarks";
+
+    // Rubber skid marks (dark tire tread marks)
+    const rubberMat = new THREE.LineBasicMaterial({
+      color: 0x020617,
+      linewidth: 4,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+    });
+
+    // High-visibility cyan illuminated center tracemark trail
+    const glowMat = new THREE.LineBasicMaterial({
+      color: 0x06b6d4,
+      linewidth: 3,
+      transparent: true,
+      opacity: 0.95,
+      depthTest: false,
+    });
+
+    this._leftLine = new THREE.LineSegments(new THREE.BufferGeometry(), rubberMat);
+    this._rightLine = new THREE.LineSegments(new THREE.BufferGeometry(), rubberMat);
+    this._glowLine = new THREE.LineSegments(new THREE.BufferGeometry(), glowMat);
+
+    this._leftLine.renderOrder = 955;
+    this._rightLine.renderOrder = 955;
+    this._glowLine.renderOrder = 956;
+
+    this.group.add(this._leftLine, this._rightLine, this._glowLine);
+
+    // Static road tread marks aligned with paved Road 17 and Cross Concourse Avenue
+    this._createRoadSurfaceTreads();
+  }
+
+  private _createRoadSurfaceTreads(): void {
+    const treadGeo = new THREE.BufferGeometry();
+    const pts: THREE.Vector3[] = [];
+    // North-South paved Road 17 at x = 16.5
+    for (let z = -30; z <= 10.8; z += 1.8) {
+      pts.push(new THREE.Vector3(16.5 - 1.15, 0.22, z));
+      pts.push(new THREE.Vector3(16.5 - 1.15, 0.22, z + 0.9));
+      pts.push(new THREE.Vector3(16.5 + 1.15, 0.22, z));
+      pts.push(new THREE.Vector3(16.5 + 1.15, 0.22, z + 0.9));
+    }
+    // Concourse turn into Auditorium access at z = 10.8
+    for (let x = 16.5; x >= 1.5; x -= 1.8) {
+      pts.push(new THREE.Vector3(x, 0.22, 10.8 - 1.15));
+      pts.push(new THREE.Vector3(x - 0.9, 0.22, 10.8 - 1.15));
+      pts.push(new THREE.Vector3(x, 0.22, 10.8 + 1.15));
+      pts.push(new THREE.Vector3(x - 0.9, 0.22, 10.8 + 1.15));
+    }
+    treadGeo.setFromPoints(pts);
+    const treadMat = new THREE.LineBasicMaterial({
+      color: 0x334155,
+      transparent: true,
+      opacity: 0.65,
+      depthTest: false,
+    });
+    const staticTracks = new THREE.LineSegments(treadGeo, treadMat);
+    staticTracks.name = "static_road_treads";
+    staticTracks.renderOrder = 954;
+    this.group.add(staticTracks);
+  }
+
+  public addPoint(pos: THREE.Vector3, heading: number): void {
+    if (this._lastPos && this._lastPos.distanceTo(pos) < 0.15) return;
+
+    const perpX = Math.cos(heading);
+    const perpZ = -Math.sin(heading);
+    const halfWidth = 1.15;
+    const y = 0.24; // Elevated directly onto road surface
+
+    const curL = new THREE.Vector3(pos.x - perpX * halfWidth, y, pos.z - perpZ * halfWidth);
+    const curR = new THREE.Vector3(pos.x + perpX * halfWidth, y, pos.z + perpZ * halfWidth);
+
+    if (this._lastPos) {
+      const prevHeading = Math.atan2(pos.x - this._lastPos.x, pos.z - this._lastPos.z);
+      const pPerpX = Math.cos(prevHeading);
+      const pPerpZ = -Math.sin(prevHeading);
+      const prevL = new THREE.Vector3(this._lastPos.x - pPerpX * halfWidth, y, this._lastPos.z - pPerpZ * halfWidth);
+      const prevR = new THREE.Vector3(this._lastPos.x + pPerpX * halfWidth, y, this._lastPos.z + pPerpZ * halfWidth);
+
+      this._leftSegments.push(prevL, curL);
+      this._rightSegments.push(prevR, curR);
+
+      this._leftLine.geometry.dispose();
+      this._leftLine.geometry = new THREE.BufferGeometry().setFromPoints(this._leftSegments);
+
+      this._rightLine.geometry.dispose();
+      this._rightLine.geometry = new THREE.BufferGeometry().setFromPoints(this._rightSegments);
+
+      const prevC = new THREE.Vector3(this._lastPos.x, y + 0.02, this._lastPos.z);
+      const curC = new THREE.Vector3(pos.x, y + 0.02, pos.z);
+      this._glowPoints.push(prevC, curC);
+      this._glowLine.geometry.dispose();
+      this._glowLine.geometry = new THREE.BufferGeometry().setFromPoints(this._glowPoints);
+    }
+
+    this._lastPos = pos.clone();
+  }
+
+  public clear(): void {
+    this._leftSegments = [];
+    this._rightSegments = [];
+    this._glowPoints = [];
+    this._lastPos = null;
+    this._leftLine.geometry.dispose();
+    this._leftLine.geometry = new THREE.BufferGeometry();
+    this._rightLine.geometry.dispose();
+    this._rightLine.geometry = new THREE.BufferGeometry();
+    this._glowLine.geometry.dispose();
+    this._glowLine.geometry = new THREE.BufferGeometry();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMERGENCY VEHICLE CONTROLLER (Phase 1.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type EmergencyVehicleStatus = "STANDBY" | "DISPATCHED" | "EN_ROUTE" | "AT_INCIDENT";
+
+export interface EmergencyVehicleControllerOptions {
+  speed?: number;
+  baseY?: number;
+  tireTracemarks?: AmbulanceTireTracemarks;
+  onWaypointReached?: (index: number, waypoint: THREE.Vector3) => void;
+  onRouteComplete?: () => void;
+  onRouteBlocked?: (blockedSegment: string) => void;
+  onStatusChange?: (status: EmergencyVehicleStatus) => void;
+  onProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+}
+
+/**
+ * Reusable Movement Controller for Emergency Vehicles & Responders on the 3D Road Network.
+ * Conforms to Phase 1.1 architecture:
+ * - Standby at initial post
+ * - Waypoint-to-waypoint centerline navigation
+ * - Smooth rotational heading interpolation (no instant snaps, backwards driving, or sliding)
+ * - Progressive route tracing and arrow synchronization
+ * - Synchronized status transitions: STANDBY -> DISPATCHED -> EN_ROUTE -> AT_INCIDENT
+ */
+export class EmergencyVehicleController {
+  public vehicle: THREE.Object3D;
+  public waypoints: THREE.Vector3[];
+  public speed: number; // world units / sec
+  public status: EmergencyVehicleStatus = "STANDBY";
+  public progress: number = 0; // 0.0 to 1.0
+  public currentWaypointIndex: number = 0;
+  public tireTracemarks?: AmbulanceTireTracemarks;
+
+  private _totalDist: number = 0;
+  private _cumulativeDist: number[] = [];
+  private _targetHeading: number = 0;
+  private _baseY: number = 0.38;
+  private _sirenTimer: number = 0;
+  private _routeVisualGroup?: THREE.Group & {
+    updateProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+  };
+
+  public onWaypointReached?: (index: number, waypoint: THREE.Vector3) => void;
+  public onRouteComplete?: () => void;
+  public onRouteBlocked?: (blockedSegment: string) => void;
+  public onStatusChange?: (status: EmergencyVehicleStatus) => void;
+  public onProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+
+  constructor(
+    vehicle: THREE.Object3D,
+    waypoints: THREE.Vector3[],
+    speed: number = EMERGENCY_VEHICLE_SPEED,
+    options?: EmergencyVehicleControllerOptions
+  ) {
+    this.vehicle = vehicle;
+    this.waypoints = waypoints;
+    this.speed = options?.speed ?? speed;
+    this._baseY = options?.baseY ?? (waypoints[0]?.y ?? 0.38);
+    this.tireTracemarks = options?.tireTracemarks;
+
+    this.onWaypointReached = options?.onWaypointReached;
+    this.onRouteComplete = options?.onRouteComplete;
+    this.onRouteBlocked = options?.onRouteBlocked;
+    this.onStatusChange = options?.onStatusChange;
+    this.onProgress = options?.onProgress;
+
+    this._computeDistances();
+
+    // Place vehicle at initial standby position
+    if (this.waypoints.length > 0) {
+      this.vehicle.position.set(this.waypoints[0].x, this._baseY, this.waypoints[0].z);
+      if (this.waypoints.length > 1) {
+        const dx = this.waypoints[1].x - this.waypoints[0].x;
+        const dz = this.waypoints[1].z - this.waypoints[0].z;
+        this.vehicle.rotation.y = Math.atan2(dx, dz);
+        this._targetHeading = this.vehicle.rotation.y;
+      }
+    }
+  }
+
+  private _computeDistances() {
+    this._totalDist = 0;
+    this._cumulativeDist = [0];
+    for (let i = 0; i < this.waypoints.length - 1; i++) {
+      const p1 = this.waypoints[i];
+      const p2 = this.waypoints[i + 1];
+      const d = p1.distanceTo(p2);
+      this._totalDist += d;
+      this._cumulativeDist.push(this._totalDist);
+    }
+  }
+
+  public setRouteVisual(
+    routeVisual: THREE.Group & { updateProgress?: (progress: number, currentPos: THREE.Vector3) => void }
+  ) {
+    this._routeVisualGroup = routeVisual;
+    this._routeVisualGroup.updateProgress?.(this.progress, this.vehicle.position);
+  }
+
+  public setWaypoints(newWaypoints: THREE.Vector3[]) {
+    this.waypoints = newWaypoints;
+    this._computeDistances();
+    this.currentWaypointIndex = 0;
+    this.progress = 0;
+    this.updateStatusBadge();
+  }
+
+  /**
+   * Dispatches the vehicle: STANDBY -> DISPATCHED -> EN_ROUTE.
+   */
+  public dispatch() {
+    this.status = "DISPATCHED";
+    this.updateStatusBadge();
+    this.onStatusChange?.("DISPATCHED");
+  }
+
+  /**
+   * Dynamic reroute when an obstruction occurs along the route.
+   */
+  public reroute(newWaypoints: THREE.Vector3[]) {
+    // Splice current vehicle position as starting waypoint
+    const currentPos = this.vehicle.position.clone();
+    this.waypoints = [currentPos, ...newWaypoints.slice(1)];
+    this._computeDistances();
+    this.currentWaypointIndex = 0;
+    this.progress = 0;
+    this.status = "EN_ROUTE";
+    this.updateStatusBadge();
+    this.onStatusChange?.("EN_ROUTE");
+  }
+
+  public pause() {
+    if (this.status === "EN_ROUTE") this.status = "DISPATCHED";
+  }
+
+  public resume() {
+    if (this.status === "DISPATCHED") this.status = "EN_ROUTE";
+  }
+
+  public complete() {
+    this.status = "AT_INCIDENT";
+    this.progress = 1.0;
+    if (this.waypoints.length > 0) {
+      const dest = this.waypoints[this.waypoints.length - 1];
+      this.vehicle.position.set(dest.x, this._baseY, dest.z);
+    }
+    this.updateStatusBadge();
+    this._routeVisualGroup?.updateProgress?.(1.0, this.vehicle.position);
+    this.onStatusChange?.("AT_INCIDENT");
+    this.onRouteComplete?.();
+  }
+
+  public reset(standbyPos?: THREE.Vector3) {
+    this.status = "STANDBY";
+    this.progress = 0;
+    this.currentWaypointIndex = 0;
+
+    const resetPos = standbyPos || (this.waypoints.length > 0 ? this.waypoints[0] : ANCHORS.AMBULANCE.position);
+    this.vehicle.position.set(resetPos.x, this._baseY, resetPos.z);
+    this.vehicle.rotation.set(0, 0, 0); // Reset rotation to forward
+    this._targetHeading = 0;
+
+    // Sirens off
+    const sirenRed = this.vehicle.getObjectByName("siren_red") as THREE.Mesh;
+    const sirenBlue = this.vehicle.getObjectByName("siren_blue") as THREE.Mesh;
+    if (sirenRed) (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(0x330000);
+    if (sirenBlue) (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(0x001144);
+
+    this.tireTracemarks?.clear();
+
+    this.updateStatusBadge();
+    this.onStatusChange?.("STANDBY");
+  }
+
+  /**
+   * Updates vehicle status badge pin texture in real time.
+   */
+  public updateStatusBadge(): void {
+    const isAmbulance = this.vehicle.name === "AMB-001" || this.vehicle.getObjectByName("siren_red") !== undefined;
+    const badgeName = isAmbulance ? "ambulance_status_badge" : "extinguisher_status_badge";
+    const badge = this.vehicle.getObjectByName(badgeName) as THREE.Sprite;
+    if (!badge) return;
+
+    if (isAmbulance) {
+      let text = "🚑 MEDIC-17 [STANDBY]";
+      let bg = "rgba(15, 23, 42, 0.90)";
+      let border = "#38bdf8";
+
+      if (this.status === "DISPATCHED") {
+        text = "🚨 MEDIC-17 [DISPATCHED]";
+        bg = "rgba(225, 29, 72, 0.95)";
+        border = "#f43f5e";
+      } else if (this.status === "EN_ROUTE") {
+        text = "🚑 MEDIC-17 [EN ROUTE]";
+        bg = "rgba(190, 18, 60, 0.95)";
+        border = "#ef4444";
+      } else if (this.status === "AT_INCIDENT") {
+        text = "🏥 MEDIC-17 [AT INCIDENT]";
+        bg = "rgba(6, 78, 59, 0.95)";
+        border = "#10b981";
+      }
+      updateTextBadge(badge, text, bg, border, "#ffffff");
+    } else {
+      let text = `🧯 ${this.vehicle.name} [AVAILABLE]`;
+      let bg = "rgba(15, 23, 42, 0.90)";
+      let border = "#ef4444";
+
+      if (this.status === "DISPATCHED" || this.status === "EN_ROUTE") {
+        text = `🧯 ${this.vehicle.name} [ASSIGNED]`;
+        bg = "rgba(225, 29, 72, 0.95)";
+        border = "#f43f5e";
+      } else if (this.status === "AT_INCIDENT") {
+        text = `🧯 ${this.vehicle.name} [AT INCIDENT]`;
+        bg = "rgba(6, 78, 59, 0.95)";
+        border = "#10b981";
+      }
+      updateTextBadge(badge, text, bg, border, "#ffffff");
+    }
+  }
+
+  /**
+   * Per-frame animation update loop:
+   * - Smooth rotation facing the travel direction
+   * - Waypoint-to-waypoint progress along road centerline
+   * - Suspension vibration & siren flashing
+   * - Progressive route tracing updates
+   */
+  public update(dtSec: number): void {
+    if (this.status === "STANDBY") {
+      // Vehicle remains at standby point
+      TwinAssetLibrary.updateAmbulanceStandby(this.vehicle);
+      return;
+    }
+
+    if (this.status === "AT_INCIDENT") {
+      // Vehicle reached destination; subtle emergency strobe
+      this.vehicle.position.y = this._baseY;
+      this._sirenTimer += dtSec * 4;
+      const sirenRed = this.vehicle.getObjectByName("siren_red") as THREE.Mesh;
+      const sirenBlue = this.vehicle.getObjectByName("siren_blue") as THREE.Mesh;
+      if (sirenRed) (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
+      if (sirenBlue) (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(0x0066ff);
+      return;
+    }
+
+    if (this.status === "DISPATCHED") {
+      // Auto transition to active EN_ROUTE as vehicle departs standby
+      this.status = "EN_ROUTE";
+      this.updateStatusBadge();
+      this.onStatusChange?.("EN_ROUTE");
+    }
+
+    if (this.waypoints.length < 2) return;
+
+    if (this.currentWaypointIndex >= this.waypoints.length - 1) {
+      this.complete();
+      return;
+    }
+
+    const currentTarget = this.waypoints[this.currentWaypointIndex + 1];
+    const pos = this.vehicle.position;
+    const dx = currentTarget.x - pos.x;
+    const dz = currentTarget.z - pos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // 1. Calculate Target Heading & Smooth Angular Rotation Interpolation
+    if (dist > 0.01) {
+      this._targetHeading = Math.atan2(dx, dz);
+    }
+    let diff = this._targetHeading - this.vehicle.rotation.y;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    const turnRate = Math.min(1.0, 9.5 * dtSec); // Smooth responsive vehicle turn
+    this.vehicle.rotation.y += diff * turnRate;
+
+    // 2. Centerline Translation
+    const step = this.speed * dtSec;
+    if (dist <= step + 0.18) {
+      pos.x = currentTarget.x;
+      pos.z = currentTarget.z;
+      this.currentWaypointIndex++;
+      this.onWaypointReached?.(this.currentWaypointIndex, currentTarget);
+
+      if (this.currentWaypointIndex >= this.waypoints.length - 1) {
+        this.complete();
+        return;
+      }
+    } else {
+      pos.x += (dx / dist) * step;
+      pos.z += (dz / dist) * step;
+    }
+
+    if (this.tireTracemarks) {
+      this.tireTracemarks.addPoint(pos, this.vehicle.rotation.y);
+    }
+
+    // 3. Realistic road suspension micro-vibration
+    pos.y = this._baseY + Math.sin(performance.now() * 0.02) * 0.018;
+
+    // 4. Emergency siren strobe flashing
+    this._sirenTimer += dtSec * 16;
+    const sirenRed = this.vehicle.getObjectByName("siren_red") as THREE.Mesh;
+    const sirenBlue = this.vehicle.getObjectByName("siren_blue") as THREE.Mesh;
+    const isRedFlash = Math.sin(this._sirenTimer * 3.5) > 0;
+    if (sirenRed) {
+      (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(isRedFlash ? 0xff1111 : 0x330000);
+    }
+    if (sirenBlue) {
+      (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(!isRedFlash ? 0x0099ff : 0x001144);
+    }
+
+    // 5. Update route progress ratio
+    if (this._totalDist > 0) {
+      const covered =
+        (this._cumulativeDist[this.currentWaypointIndex] || 0) +
+        pos.distanceTo(this.waypoints[this.currentWaypointIndex]);
+      this.progress = Math.min(1.0, Math.max(0, covered / this._totalDist));
+    }
+
+    // 6. Progressive Route Visual Update (Traveled line vs remaining line & arrows)
+    this._routeVisualGroup?.updateProgress?.(this.progress, pos);
+    this.onProgress?.(this.progress, pos);
+  }
+}
+
+/** Backward compatibility alias */
+export { EmergencyVehicleController as RouteTracingController };
+

@@ -15,7 +15,8 @@ export type WorldObjectType =
   | "barricade"
   | "checkpoint"
   | "ambulance"
-  | "medical_tent";
+  | "medical_tent"
+  | "fire_extinguisher";
 
 export interface Vector3D {
   x: number;
@@ -40,11 +41,29 @@ export interface SemanticWorldObject {
     width_m?: number;
     capacity_per_sec?: number;
     flow_capacity_ped_per_sec?: number;
-    status: "OPEN" | "BLOCKED" | "CLEAR" | "CONGESTED" | "STANDBY";
+    status:
+      | "OPEN"
+      | "BLOCKED"
+      | "CLEAR"
+      | "CONGESTED"
+      | "STANDBY"
+      | "AVAILABLE"
+      | "ASSIGNED"
+      | "DISPATCHED"
+      | "EN_ROUTE"
+      | "IN_TRANSIT"
+      | "AT_INCIDENT"
+      | "UNAVAILABLE";
     is_blocked?: boolean;
     is_step_free?: boolean;
     is_emergency_corridor?: boolean;
     connects_to?: string | string[];
+    incident_id?: string;
+    eta?: number;
+    distance_m?: number;
+    route_type?: string;
+    building?: string;
+    floor?: number;
     [key: string]: any;
   };
 }

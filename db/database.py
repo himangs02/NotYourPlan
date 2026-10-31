@@ -147,6 +147,81 @@ class MekoContextModel(Base):
     context_payload = Column(JSONType, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+# Phase 1: Emergency Resource & Routing Persistence
+class EmergencyResourceModel(Base):
+    __tablename__ = "emergency_resources"
+
+    id = Column(String(64), primary_key=True)
+    type = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)
+    status = Column(Text, nullable=False)
+    location = Column(Text, nullable=False)
+    building = Column(Text, nullable=True)
+    floor = Column(Integer, nullable=True)
+    availability = Column(Text, nullable=False, default="AVAILABLE")
+    capacity = Column(Integer, nullable=True)
+    assigned_incident = Column(Text, nullable=True)
+    current_route = Column(JSONType, nullable=True)
+    destination = Column(Text, nullable=True)
+    eta = Column(Integer, nullable=True)
+    coordinates = Column(JSONType, nullable=True)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class EmergencyIncidentModel(Base):
+    __tablename__ = "emergency_incidents"
+
+    incident_id = Column(String(64), primary_key=True)
+    type = Column(Text, nullable=False, default="FIRE")
+    location = Column(Text, nullable=False)
+    building = Column(Text, nullable=False)
+    floor = Column(Integer, nullable=False, default=2)
+    status = Column(Text, nullable=False, default="ACTIVE")
+    coordinates = Column(JSONType, nullable=False)
+    hazard_radius_meters = Column(Float, nullable=False, default=14.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class EmergencyDispatchModel(Base):
+    __tablename__ = "emergency_dispatches"
+
+    dispatch_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resource_id = Column(String(64), ForeignKey("emergency_resources.id"), nullable=False)
+    incident_id = Column(String(64), ForeignKey("emergency_incidents.incident_id"), nullable=False)
+    dispatched_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(Text, nullable=False, default="DISPATCHED")
+    route_id = Column(String(64), nullable=True)
+
+class EmergencyRouteModel(Base):
+    __tablename__ = "emergency_routes"
+
+    route_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    resource_id = Column(String(64), ForeignKey("emergency_resources.id"), nullable=False)
+    incident_id = Column(String(64), ForeignKey("emergency_incidents.incident_id"), nullable=False)
+    world_version = Column(Integer, nullable=False, default=1)
+    route = Column(JSONType, nullable=False)
+    waypoints = Column(JSONType, nullable=False)
+    distance_meters = Column(Float, nullable=False)
+    estimated_time_seconds = Column(Integer, nullable=False)
+    safe = Column(Integer, nullable=False, default=1)
+    hazards = Column(JSONType, nullable=True)
+    blocked_segments = Column(JSONType, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    provenance = Column(JSONType, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class EmergencyNotificationModel(Base):
+    __tablename__ = "emergency_notifications"
+
+    notification_id = Column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    incident_id = Column(String(64), ForeignKey("emergency_incidents.incident_id"), nullable=False)
+    resource_id = Column(String(64), ForeignKey("emergency_resources.id"), nullable=False)
+    title = Column(Text, nullable=False)
+    message = Column(Text, nullable=False)
+    priority = Column(Text, nullable=False, default="CRITICAL")
+    eta_seconds = Column(Integer, nullable=False)
+    route_summary = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Database Engine setup
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:

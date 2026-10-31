@@ -6,11 +6,25 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import {
   RotateCcw, Layers, AlertTriangle, Plus, MapPin, X, Loader2,
-  Activity, Shield, Eye, Zap, Flame
+  Activity, Shield, Eye, Zap, Flame, Siren, Navigation
 } from "lucide-react";
 import { SemanticWorldObject, CameraViewMode, SimViewMode, PlanMetrics3D } from "./types";
-import { TwinAssetLibrary } from "./AssetLibrary";
-import { ANCHORS } from "./worldAnchors";
+import {
+  TwinAssetLibrary,
+  EmergencyVehicleController,
+  RouteTracingController,
+  AmbulanceTireTracemarks,
+} from "./AssetLibrary";
+import type { OccupancyAssessment } from "./OccupancyAssessmentPanel";
+import {
+  ANCHORS,
+  AMBULANCE_SAFE_ROUTE,
+  AMBULANCE_REROUTE_PATH,
+  FE_002_SAFE_ROUTE,
+  EMERGENCY_VEHICLE_SPEED,
+  EMERGENCY_RESPONDER_SPEED
+} from "./worldAnchors";
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CITY MODEL TRANSFORM — tune to align city.glb with EventFlow world coords.
@@ -24,8 +38,27 @@ export const CITY_MODEL_TRANSFORM = {
 
 const CITY_GLB_PATHS = ["/models/city.optimized.glb", "/models/city.glb"];
 
+export interface HoveredBlockInfo {
+  id: string;
+  name: string;
+  blockCode: string;
+  icon: string;
+  description: string;
+  statusText: string;
+  statusColor: string;
+  capacity?: number;
+  accessible?: boolean;
+  x: number;
+  y: number;
+  isGate?: boolean;
+  isBlocked?: boolean;
+  cameraPreset?: CameraViewMode;
+  obj?: SemanticWorldObject;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 interface VenueTwinViewerProps {
+  occupancyAssessment?: OccupancyAssessment | null;
   worldVersion: string;
   worldVersionId: string;
   blockedGate: string | null;
@@ -38,9 +71,16 @@ interface VenueTwinViewerProps {
   selectedPlanId?: string;
   isFireActive?: boolean;
   onToggleFire?: () => void;
+  ambRerouted?: boolean;
+  selectedResourceId?: string | null;
+  onEmergencyStatusChange?: (resourceId: string, status: string, etaSeconds: number) => void;
+  isEvacuating?: boolean;
+  onToggleEvacuation?: () => void;
+  onDeployExtinguisher?: () => void;
 }
 
 export default function VenueTwinViewer({
+  occupancyAssessment = null,
   worldVersion,
   worldVersionId,
   blockedGate,
@@ -53,7 +93,14 @@ export default function VenueTwinViewer({
   selectedPlanId = "",
   isFireActive = false,
   onToggleFire,
+  ambRerouted = false,
+  selectedResourceId = null,
+  onEmergencyStatusChange,
+  isEvacuating: externalIsEvacuating = false,
+  onToggleEvacuation,
+  onDeployExtinguisher,
 }: VenueTwinViewerProps) {
+
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -69,11 +116,33 @@ export default function VenueTwinViewer({
   const attendeeMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const wheelMeshRef = useRef<THREE.InstancedMesh | null>(null);
 
+  // Phase 1 & 1.1: Emergency route and resource tracking refs
+  const ambRouteGroupRef = useRef<THREE.Group | null>(null);
+  const feRouteGroupRef = useRef<THREE.Group | null>(null);
+  const ambControllerRef = useRef<EmergencyVehicleController | null>(null);
+  const feControllerRef = useRef<EmergencyVehicleController | null>(null);
+
+  // Ambulance tire tracemarks, extinguisher spray & building hover outline
+  const tireTracksRef = useRef<AmbulanceTireTracemarks | null>(null);
+  const extinguisherSprayRef = useRef<THREE.Group | null>(null);
+  const hoverOutlineRef = useRef<THREE.BoxHelper | null>(null);
+
   const [selectedObj, setSelectedObj] = useState<SemanticWorldObject | null>(null);
   const [simViewMode, setSimViewMode] = useState<SimViewMode>("3D");
   const [cameraViewMode, setCameraViewMode] = useState<CameraViewMode>("PERSPECTIVE");
   const [showAssetPalette, setShowAssetPalette] = useState(false);
   const [addedObjects, setAddedObjects] = useState<SemanticWorldObject[]>([]);
+
+  // Features: Hide marks by default, hover block menu, fire extinguisher, crowd evacuation
+  const [showLabels, setShowLabels] = useState(false);
+  const [isEvacuating, setIsEvacuating] = useState(externalIsEvacuating);
+  const [isExtinguishing, setIsExtinguishing] = useState(false);
+  const [hoveredInfo, setHoveredInfo] = useState<HoveredBlockInfo | null>(null);
+
+  // Sync external evacuation prop if provided
+  useEffect(() => {
+    setIsEvacuating(externalIsEvacuating);
+  }, [externalIsEvacuating]);
 
   // GLB state
   const [cityLoading, setCityLoading] = useState(true);
@@ -204,18 +273,285 @@ export default function VenueTwinViewer({
       properties: { capacity: 3500, safe_distance_m: 150, status: "CLEAR" },
     },
     {
-      id: ANCHORS.AMBULANCE.id,
+      id: "AMB-001",
       type: "ambulance",
-      name: ANCHORS.AMBULANCE.label,
+      name: "Ambulance 01 (MEDIC-17)",
       position: { x: ANCHORS.AMBULANCE.position.x, y: ANCHORS.AMBULANCE.position.y, z: ANCHORS.AMBULANCE.position.z },
-      properties: { vehicle_type: "BLS Ambulance", callsign: "MEDIC-17", status: "STANDBY" },
+      properties: {
+        vehicle_type: "BLS Ambulance",
+        callsign: "MEDIC-17",
+        status: !isFireActive ? "STANDBY" : (ambRerouted ? "EN_ROUTE" : "DISPATCHED"),
+        availability: !isFireActive ? "AVAILABLE" : "DISPATCHED",
+        incident_id: isFireActive ? "EV-001" : undefined,
+        eta: isFireActive ? (ambRerouted ? 91 : 72) : undefined,
+        distance_m: isFireActive ? (ambRerouted ? 230 : 184) : undefined,
+        route_type: ambRerouted ? "Emergency Safe Route (Bypass)" : "Emergency Safe Route",
+        is_emergency_corridor: true,
+        rejection_reason: isFireActive
+          ? (ambRerouted
+              ? "Emergency corridor obstruction on Road 17. Ambulance rerouted via East Arcade bypass."
+              : "Shortest route blocked by fire hazard. Ambulance redirected through protected emergency corridor.")
+          : undefined,
+      },
     },
-  ], [blockedGate, road17Congested]);
+    {
+      id: "FE-001",
+      type: "fire_extinguisher",
+      name: "Fire Extinguisher FE-001",
+      position: { x: ANCHORS.FIRE_EXTINGUISHER_1.position.x, y: ANCHORS.FIRE_EXTINGUISHER_1.position.y, z: ANCHORS.FIRE_EXTINGUISHER_1.position.z },
+      properties: {
+        status: "AVAILABLE",
+        availability: "AVAILABLE",
+        building: "Building B",
+        floor: 1,
+        capacity: 10,
+        distance_m: 210,
+        route_type: "Safe Response Route",
+      },
+    },
+    {
+      id: "FE-002",
+      type: "fire_extinguisher",
+      name: "Fire Extinguisher FE-002 (Assigned)",
+      position: { x: ANCHORS.FIRE_EXTINGUISHER_2.position.x, y: ANCHORS.FIRE_EXTINGUISHER_2.position.y, z: ANCHORS.FIRE_EXTINGUISHER_2.position.z },
+      properties: {
+        status: isFireActive ? "ASSIGNED" : "AVAILABLE",
+        availability: isFireActive ? "ASSIGNED" : "AVAILABLE",
+        building: "Building B",
+        floor: 2,
+        capacity: 10,
+        incident_id: isFireActive ? "EV-001" : undefined,
+        eta: isFireActive ? 34 : undefined,
+        distance_m: 85,
+        route_type: "Safe Response Route",
+        selection_rationale: "Selected nearest safe extinguisher (85m vs FE-003: 142m, FE-001: 210m)",
+      },
+    },
+    {
+      id: "FE-003",
+      type: "fire_extinguisher",
+      name: "Fire Extinguisher FE-003",
+      position: { x: ANCHORS.FIRE_EXTINGUISHER_3.position.x, y: ANCHORS.FIRE_EXTINGUISHER_3.position.y, z: ANCHORS.FIRE_EXTINGUISHER_3.position.z },
+      properties: {
+        status: "AVAILABLE",
+        availability: "AVAILABLE",
+        building: "Building A",
+        floor: 1,
+        capacity: 10,
+        distance_m: 142,
+        route_type: "Safe Response Route",
+      },
+    },
+  ], [blockedGate, road17Congested, isFireActive, ambRerouted]);
+
 
   const allWorldObjects = useMemo(
     () => [...baseSemanticObjects, ...addedObjects],
     [baseSemanticObjects, addedObjects]
   );
+
+  const getBlockInfoFromSemantic = useCallback((obj: SemanticWorldObject, x: number, y: number): HoveredBlockInfo => {
+    let icon = "🏢";
+    let blockCode = "Block";
+    let description = "EventFlow campus zone";
+    let statusText = "OPERATIONAL";
+    let statusColor = "bg-emerald-950 text-emerald-300 border-emerald-700";
+    let cameraPreset: CameraViewMode | undefined = undefined;
+
+    if (obj.type === "auditorium") {
+      icon = "🏛️";
+      blockCode = "Block A · Auditorium Sector";
+      description = "Primary venue gathering arena. Capacity: 1,800 occupants. Direct link to Road 17 and West Ramp.";
+      cameraPreset = "FOCUS_AUDITORIUM";
+      if (isFireActive) {
+        statusText = "🔥 ACTIVE FIRE HAZARD";
+        statusColor = "bg-rose-950 text-rose-300 border-rose-700 animate-pulse";
+      } else if (isEvacuating) {
+        statusText = "🏃 EVACUATION ACTIVE";
+        statusColor = "bg-amber-950 text-amber-300 border-amber-700";
+      }
+    } else if (obj.type === "food_court") {
+      icon = "🍽️";
+      blockCode = "Block B · Concourse Dining";
+      description = "Concourse dining and hospitality pavilion connecting directly to Gate 2 Main South Plaza.";
+      if (isEvacuating) {
+        statusText = "🏃 EVACUATING CROWD";
+        statusColor = "bg-amber-950 text-amber-300 border-amber-700";
+      }
+    } else if (obj.type === "parking") {
+      icon = "🅿️";
+      blockCode = "Block C · North Parking Logistics";
+      description = "Vehicle parking plaza and bypass transit corridor for emergency responders.";
+    } else if (obj.type === "assembly_area") {
+      icon = "🛡️";
+      blockCode = "Sector Safe · Assembly Plaza";
+      description = "Designated central evacuation zone. 3,500 capacity, 150m safe buffer distance.";
+      cameraPreset = "FOCUS_ASSEMBLY";
+      statusText = "SAFE ASSEMBLED ZONE";
+      statusColor = "bg-emerald-950 text-emerald-300 border-emerald-700";
+    } else if (obj.type === "gate") {
+      icon = "🚪";
+      blockCode = `Gate Sector · ${obj.id.toUpperCase()}`;
+      description = `Access threshold with ${obj.properties.width_m ?? 6}m egress width and ${obj.properties.flow_capacity_ped_per_sec ?? 8} ped/sec flow capacity.`;
+      cameraPreset = obj.id === "gate_2" ? "FOCUS_GATE2" : undefined;
+      const isBlocked = obj.properties.is_blocked || obj.properties.status === "BLOCKED";
+      statusText = isBlocked ? "⛔ BLOCKED" : "🟢 OPEN";
+      statusColor = isBlocked ? "bg-rose-950 text-rose-300 border-rose-700" : "bg-emerald-950 text-emerald-300 border-emerald-700";
+    } else if (obj.type === "emergency_route" || obj.id === "road_17") {
+      icon = "🛣️";
+      blockCode = "Corridor R-17 · Medical Express";
+      description = "Protected emergency vehicle corridor with priority right-of-way for MEDIC-17 on the paved road.";
+      cameraPreset = "FOCUS_ROAD17";
+      statusText = road17Congested ? "⚠️ CONGESTED" : "CLEAR";
+      statusColor = road17Congested ? "bg-rose-950 text-rose-300 border-rose-700" : "bg-cyan-950 text-cyan-300 border-cyan-700";
+    } else if (obj.type === "accessible_route" || obj.id === "ramp_stepfree") {
+      icon = "♿";
+      blockCode = "Ramp W-01 · Step-Free Access";
+      description = "Universal accessibility ramp (4.5% gradient) directly connecting Auditorium to Gate 4.";
+      statusText = "ACCESSIBLE PASS";
+      statusColor = "bg-cyan-950 text-cyan-300 border-cyan-700";
+    } else if (obj.type === "ambulance" || obj.id === "AMB-001") {
+      icon = "🚑";
+      blockCode = "Emergency Unit · MEDIC-17";
+      description = "BLS Ambulance deployed for rapid emergency response. Drives strictly along paved Road 17.";
+      statusText = ambControllerRef.current?.status ?? (isFireActive ? "EN_ROUTE" : "STANDBY");
+      statusColor = statusText === "STANDBY" ? "bg-slate-800 text-cyan-300 border-slate-700" : "bg-rose-950 text-rose-300 border-rose-700 animate-pulse";
+    } else if (obj.type === "fire_extinguisher" || obj.id.startsWith("FE-")) {
+      icon = "🧯";
+      blockCode = `Station ${obj.id} · Rapid Suppression`;
+      description = `Class ABC chemical fire suppression station stationed in ${obj.properties.building ?? "Building B"}.`;
+      statusText = obj.properties.status ?? "AVAILABLE";
+      statusColor = statusText === "AVAILABLE" ? "bg-emerald-950 text-emerald-300 border-emerald-700" : "bg-amber-950 text-amber-300 border-amber-700";
+    }
+
+    return {
+      id: obj.id,
+      name: obj.name,
+      blockCode,
+      icon,
+      description,
+      statusText,
+      statusColor,
+      capacity: obj.properties.capacity ?? (obj.dimensions?.width ? obj.properties.capacity as number | undefined : undefined),
+      accessible: obj.properties.accessible ?? obj.properties.is_step_free,
+      x,
+      y,
+      isGate: obj.type === "gate",
+      isBlocked: obj.properties.is_blocked || obj.properties.status === "BLOCKED",
+      cameraPreset,
+      obj,
+    };
+  }, [isFireActive, isEvacuating, road17Congested]);
+
+  const getBlockInfoFromPoint = useCallback((pt: THREE.Vector3, x: number, y: number): HoveredBlockInfo | null => {
+    // Auditorium Hall
+    if (Math.abs(pt.x) <= 13 && pt.z >= -9 && pt.z <= 9) {
+      const match = allWorldObjects.find((o) => o.id === "auditorium_hall");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+    // Food Court Concourse
+    if (Math.abs(pt.x) <= 13 && pt.z >= 11 && pt.z <= 23) {
+      const match = allWorldObjects.find((o) => o.id === "food_court");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+    // North-South Road 17 Emergency Medical Corridor (x: 14 to 19, z: -32 to 12)
+    if (pt.x >= 14 && pt.x <= 19 && pt.z >= -32 && pt.z <= 12) {
+      const match = allWorldObjects.find((o) => o.id === "road_17");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+    // North Parking Plaza (east of Road 17)
+    if (pt.x >= 19 && pt.z <= 10 && pt.z >= -26) {
+      const match = allWorldObjects.find((o) => o.id === "parking_plaza");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+    // Central Assembly Plaza (south sector)
+    if (Math.abs(pt.x) <= 22 && pt.z >= 26) {
+      const match = allWorldObjects.find((o) => o.id === "assembly_central_plaza");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+    // Step-Free Accessibility Ramp (west sector)
+    if (pt.x <= -14 && pt.z >= 6 && pt.z <= 16) {
+      const match = allWorldObjects.find((o) => o.id === "ramp_stepfree");
+      if (match) return getBlockInfoFromSemantic(match, x, y);
+    }
+
+    // Surrounding campus blocks
+    let name = "Campus Commercial Sector";
+    let blockCode = "Block E · Commercial Arcade";
+    let desc = "Auxiliary campus commercial facilities and services.";
+    let icon = "🏢";
+    if (pt.x < -12) {
+      name = "West Academic Wing";
+      blockCode = "Block W · Academic Complex";
+      desc = "Multilevel academic department complex with step-free concourse access.";
+      icon = "🏫";
+    } else if (pt.z < -14) {
+      name = "North Logistics Plaza";
+      blockCode = "Block N · Logistics Annex";
+      desc = "Service infrastructure and vehicle maintenance staging.";
+      icon = "🏭";
+    }
+
+    return {
+      id: "city_block_" + Math.round(pt.x) + "_" + Math.round(pt.z),
+      name,
+      blockCode,
+      icon,
+      description: desc,
+      statusText: "OPERATIONAL",
+      statusColor: "bg-slate-800 text-slate-300 border-slate-700",
+      x,
+      y,
+    };
+  }, [allWorldObjects, getBlockInfoFromSemantic]);
+
+  const handleToggleLabels = useCallback(() => {
+    setShowLabels((prev) => {
+      const next = !prev;
+      TwinAssetLibrary.setShowLabels(next, sceneRef.current ?? undefined);
+      return next;
+    });
+  }, []);
+
+  const handleTriggerEvacuate = useCallback(() => {
+    setIsEvacuating((prev) => {
+      const next = !prev;
+      TwinAssetLibrary.setEvacuationState(next, blockedGate === "gate_2");
+      return next;
+    });
+    onToggleEvacuation?.();
+  }, [blockedGate, onToggleEvacuation]);
+
+  const handleDeployExtinguisher = useCallback(() => {
+    if (!sceneRef.current) return;
+    const scene = sceneRef.current;
+
+    // Dispatch FE-002 controller if active
+    if (feControllerRef.current) {
+      feControllerRef.current.dispatch();
+    }
+
+    const fe2 = scene.getObjectByName("FE-002");
+    const sprayOrigin = fe2
+      ? fe2.position.clone().add(new THREE.Vector3(0, 1.2, 0))
+      : new THREE.Vector3(-1.5, 1.2, 10.8);
+
+    if (extinguisherSprayRef.current) {
+      extinguisherSprayRef.current.removeFromParent();
+    }
+
+    // Target rooftop fire at y = 14.0
+    const fireTarget = new THREE.Vector3(0, 14.0, 0);
+    const spray = TwinAssetLibrary.createExtinguisherSpray(
+      sprayOrigin,
+      fireTarget
+    );
+    scene.add(spray);
+    extinguisherSprayRef.current = spray;
+    setIsExtinguishing(true);
+    onEmergencyStatusChange?.("FE-002", "IN_TRANSIT", 0);
+    onDeployExtinguisher?.();
+  }, [onEmergencyStatusChange, onDeployExtinguisher]);
 
   // ── Scene initialisation (runs once) ─────────────────────────────────────
   useEffect(() => {
@@ -230,6 +566,17 @@ export default function VenueTwinViewer({
     const grid = new THREE.GridHelper(150, 75, 0x1e293b, 0x0f172a);
     grid.position.y = -0.02;
     scene.add(grid);
+
+    // Ambulance Tire Tracemarks ground layer
+    const tireTracks = new AmbulanceTireTracemarks();
+    scene.add(tireTracks.group);
+    tireTracksRef.current = tireTracks;
+
+    // Building Hover Outline Highlight Box
+    const hoverBox = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)), 0x38bdf8);
+    hoverBox.visible = false;
+    scene.add(hoverBox);
+    hoverOutlineRef.current = hoverBox;
 
     // City GLB group — added BEFORE semantic objects so it renders beneath
     const cityGroup = new THREE.Group();
@@ -300,9 +647,67 @@ export default function VenueTwinViewer({
     window.addEventListener("mouseup", onMouseUp);
     domElem.addEventListener("wheel", onWheel, { passive: false });
 
-    // Raycasting — semantic objects only (not GLB)
+    // Raycasting — interactive semantic objects & GLB building inspection
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+
+    const onPointerMove = (e: MouseEvent) => {
+      if (isDragging) {
+        setHoveredInfo(null);
+        if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+        return;
+      }
+      const rect = domElem.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      // 1. Check semantic objects
+      const semHits = raycaster.intersectObjects(objectsGroup.children, true);
+      if (semHits.length > 0) {
+        let cur: THREE.Object3D | null = semHits[0].object;
+        while (cur && !cur.userData?.semanticObject && cur.parent && cur !== objectsGroup) {
+          cur = cur.parent;
+        }
+        if (cur?.userData?.semanticObject) {
+          const obj = cur.userData.semanticObject as SemanticWorldObject;
+          if (hoverOutlineRef.current) {
+            hoverOutlineRef.current.setFromObject(cur);
+            hoverOutlineRef.current.visible = true;
+          }
+          const info = getBlockInfoFromSemantic(obj, e.clientX - rect.left, e.clientY - rect.top);
+          setHoveredInfo(info);
+          return;
+        }
+      }
+
+      // 2. Check GLB city environment buildings
+      const cityHits = raycaster.intersectObjects(cityGroup.children, true);
+      if (cityHits.length > 0 && cityHits[0].point.y > 0.4) {
+        const pt = cityHits[0].point;
+        if (hoverOutlineRef.current && cityHits[0].object) {
+          hoverOutlineRef.current.setFromObject(cityHits[0].object);
+          hoverOutlineRef.current.visible = true;
+        }
+        const info = getBlockInfoFromPoint(pt, e.clientX - rect.left, e.clientY - rect.top);
+        if (info) {
+          setHoveredInfo(info);
+          return;
+        }
+      }
+
+      if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+      setHoveredInfo(null);
+    };
+
+    const onPointerLeave = () => {
+      setHoveredInfo(null);
+      if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+    };
+
+    domElem.addEventListener("mousemove", onPointerMove);
+    domElem.addEventListener("mouseleave", onPointerLeave);
+
     const onClick = (e: MouseEvent) => {
       const rect = domElem.getBoundingClientRect();
       mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -321,7 +726,7 @@ export default function VenueTwinViewer({
     };
     domElem.addEventListener("click", onClick);
 
-    // Animation loop — also runs crowd animation
+    // Animation loop — also runs crowd animation & fire suppression
     let angle = 0;
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -331,19 +736,56 @@ export default function VenueTwinViewer({
       angle += 0.02;
 
       // Drive moving ambulance along Road 17 emergency corridor
-      const amb = scene.getObjectByName("ambulance_unit_1");
+      const amb = scene.getObjectByName("AMB-001");
       if (amb) {
-        TwinAssetLibrary.updateAmbulanceAnimation(dt, amb as THREE.Group);
+        if (ambControllerRef.current) {
+          ambControllerRef.current.update(Math.min(dt / 1000, 0.05));
+        } else {
+          TwinAssetLibrary.updateAmbulanceStandby(amb);
+        }
       }
 
-      // Animate fire particles & flame flickering
-      if (fireGroupRef.current) {
+      // Drive fire response FE-002 marker
+      const fe2 = scene.getObjectByName("FE-002");
+      if (fe2) {
+        if (feControllerRef.current) {
+          feControllerRef.current.update(Math.min(dt / 1000, 0.05));
+        }
+      }
+
+      // Update active fire extinguisher spray & suppression action
+      if (isExtinguishing && extinguisherSprayRef.current) {
+        if (fe2) {
+          extinguisherSprayRef.current.position.set(fe2.position.x, fe2.position.y + 1.2, fe2.position.z);
+        }
+        TwinAssetLibrary.updateExtinguisherSpray(dt, extinguisherSprayRef.current);
+        if (fireGroupRef.current) {
+          const fullyExtinguished = TwinAssetLibrary.extinguishFire(dt, fireGroupRef.current);
+          if (fullyExtinguished) {
+            setIsExtinguishing(false);
+            if (extinguisherSprayRef.current) {
+              extinguisherSprayRef.current.removeFromParent();
+              extinguisherSprayRef.current = null;
+            }
+            if (fireGroupRef.current) {
+              fireGroupRef.current.removeFromParent();
+              fireGroupRef.current = null;
+            }
+            onToggleFire?.();
+            onEmergencyStatusChange?.("FE-002", "AVAILABLE", 0);
+          }
+        }
+      } else if (fireGroupRef.current) {
         TwinAssetLibrary.updateFireEffect(dt, fireGroupRef.current);
       }
 
-      // Animate crowd
+      // Animate crowd evacuation stream along verified safe corridors
       if (attendeeMeshRef.current && wheelMeshRef.current) {
-        TwinAssetLibrary.updateCrowdAnimation(dt, attendeeMeshRef.current, wheelMeshRef.current);
+        TwinAssetLibrary.updateCrowdAnimation(
+          dt,
+          attendeeMeshRef.current,
+          wheelMeshRef.current
+        );
       }
 
       renderer.render(scene, camera);
@@ -430,8 +872,24 @@ export default function VenueTwinViewer({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       domElem.removeEventListener("mousedown", onMouseDown);
+      domElem.removeEventListener("mousemove", onPointerMove);
+      domElem.removeEventListener("mouseleave", onPointerLeave);
       domElem.removeEventListener("wheel", onWheel);
       domElem.removeEventListener("click", onClick);
+      if (tireTracksRef.current) {
+        tireTracksRef.current.clear();
+        scene.remove(tireTracksRef.current.group);
+        tireTracksRef.current = null;
+      }
+      if (extinguisherSprayRef.current) {
+        scene.remove(extinguisherSprayRef.current);
+        extinguisherSprayRef.current = null;
+      }
+      if (hoverOutlineRef.current) {
+        scene.remove(hoverOutlineRef.current);
+        hoverOutlineRef.current.dispose();
+        hoverOutlineRef.current = null;
+      }
       cityGroup.traverse((c) => {
         if ((c as THREE.Mesh).isMesh) {
           const m = c as THREE.Mesh;
@@ -456,6 +914,28 @@ export default function VenueTwinViewer({
       const isHighlighted = selectedObj?.id === obj.id || highlightedElementId === obj.id;
       root.add(TwinAssetLibrary.createObjectMesh(obj, isHighlighted));
     }
+    // Enforce label visibility (hidden by default)
+    TwinAssetLibrary.setShowLabels(showLabels, root);
+
+    // Reconnect active emergency vehicle controllers to new meshes if scene rebuilt
+    const newAmb = root.getObjectByName("AMB-001");
+    if (newAmb) {
+      if (ambControllerRef.current) {
+        newAmb.position.copy(ambControllerRef.current.vehicle.position);
+        newAmb.rotation.copy(ambControllerRef.current.vehicle.rotation);
+        ambControllerRef.current.vehicle = newAmb;
+        ambControllerRef.current.updateStatusBadge();
+      } else {
+        TwinAssetLibrary.updateAmbulanceStandby(newAmb);
+      }
+    }
+    const newFe2 = root.getObjectByName("FE-002");
+    if (newFe2 && feControllerRef.current) {
+      newFe2.position.copy(feControllerRef.current.vehicle.position);
+      newFe2.rotation.copy(feControllerRef.current.vehicle.rotation);
+      feControllerRef.current.vehicle = newFe2;
+      feControllerRef.current.updateStatusBadge();
+    }
 
     // Reset agents when gate state changes so waypoints are recalculated
     TwinAssetLibrary.resetAgents();
@@ -469,6 +949,49 @@ export default function VenueTwinViewer({
     wheelMeshRef.current = wheelMesh;
     root.add(group);
   }, [allWorldObjects, selectedObj, highlightedElementId, blockedGate]);
+
+  // Schematic occupancy sectors, positioned from the backend world footprint.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || !occupancyAssessment || !isFireActive) return;
+    const group = new THREE.Group();
+    group.name = "occupancy_assessment_zones";
+    const colors = [0xfbbf24, 0xfb923c, 0xa78bfa];
+    occupancyAssessment.zones.forEach((zone, i) => {
+      const b = zone.bounds;
+      const geometry = new THREE.PlaneGeometry(b.width - 0.15, b.depth);
+      const material = new THREE.MeshBasicMaterial({ color: colors[i % colors.length], transparent: true,
+        opacity: 0.3, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.set(b.x, 0.2, b.z);
+      mesh.renderOrder = 950;
+      group.add(mesh);
+      const canvas = document.createElement("canvas");
+      canvas.width = 384; canvas.height = 96;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#0f172a"; ctx.fillRect(0, 0, 384, 96);
+        ctx.fillStyle = "#fef3c7"; ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(`Z${i + 1} · ${zone.occupant_count} modeled`, 192, 42);
+        ctx.font = "23px sans-serif"; ctx.fillText("Schematic sector", 192, 77);
+        const texture = new THREE.CanvasTexture(canvas);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false }));
+        sprite.position.set(b.x, 10, b.z); sprite.scale.set(8, 2, 1); sprite.renderOrder = 951;
+        sprite.userData = { isSemanticBadge: true };
+        sprite.visible = showLabels;
+        group.add(sprite);
+      }
+    });
+    scene.add(group);
+    return () => {
+      scene.remove(group);
+      group.traverse(object => {
+        if (object instanceof THREE.Mesh) { object.geometry.dispose(); object.material.dispose(); }
+        if (object instanceof THREE.Sprite) { object.material.map?.dispose(); object.material.dispose(); }
+      });
+    };
+  }, [occupancyAssessment, isFireActive, showLabels]);
 
   // Synchronize 3D Fire Simulation in Main Auditorium
   useEffect(() => {
@@ -491,6 +1014,137 @@ export default function VenueTwinViewer({
       TwinAssetLibrary.setFireState(false, blockedGate === "gate_2");
     }
   }, [isFireActive, blockedGate]);
+
+  // Synchronize 3D Emergency Routes (Ambulance + Fire Extinguisher)
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const scene = sceneRef.current;
+
+    // Remove old route visuals
+    const oldAmb1 = scene.getObjectByName("emergency_route_visual_Ambulance Safe Route");
+    if (oldAmb1) oldAmb1.removeFromParent();
+    const oldAmb2 = scene.getObjectByName("emergency_route_visual_Ambulance Reroute (Bypass)");
+    if (oldAmb2) oldAmb2.removeFromParent();
+    const oldFe = scene.getObjectByName("emergency_route_visual_FE-002 Response Route");
+    if (oldFe) oldFe.removeFromParent();
+
+    if (isFireActive) {
+      // 1. Ambulance Safe Route
+      const ambWps = ambRerouted ? AMBULANCE_REROUTE_PATH : AMBULANCE_SAFE_ROUTE;
+      const ambRoute = TwinAssetLibrary.createEmergencyRouteVisual(
+        ambWps,
+        0x06b6d4, // Glowing Cyan
+        ambRerouted ? "Ambulance Reroute (Bypass)" : "Ambulance Safe Route",
+        false
+      );
+      ambRouteGroupRef.current = ambRoute;
+      scene.add(ambRoute);
+
+      const amb = scene.getObjectByName("AMB-001");
+      if (amb) {
+        if (!ambControllerRef.current) {
+          const ambCtrl = new EmergencyVehicleController(
+            amb,
+            ambWps,
+            EMERGENCY_VEHICLE_SPEED,
+            {
+              tireTracemarks: tireTracksRef.current ?? undefined,
+              onStatusChange: (status) => {
+                onEmergencyStatusChange?.("AMB-001", status, status === "AT_INCIDENT" ? 0 : (ambRerouted ? 91 : 72));
+              },
+              onRouteComplete: () => {
+                onEmergencyStatusChange?.("AMB-001", "AT_INCIDENT", 0);
+              },
+            }
+          );
+          ambCtrl.setRouteVisual(ambRoute);
+          ambCtrl.dispatch();
+          ambControllerRef.current = ambCtrl;
+          onEmergencyStatusChange?.("AMB-001", "DISPATCHED", ambRerouted ? 91 : 72);
+        } else if (ambRerouted) {
+          ambControllerRef.current.tireTracemarks = tireTracksRef.current ?? undefined;
+          ambControllerRef.current.reroute(ambWps);
+          ambControllerRef.current.setRouteVisual(ambRoute);
+          onEmergencyStatusChange?.("AMB-001", "EN_ROUTE", 91);
+        }
+      }
+
+      // 2. Fire Extinguisher FE-002 Safe Route
+      const feRoute = TwinAssetLibrary.createEmergencyRouteVisual(
+        FE_002_SAFE_ROUTE,
+        0xf97316, // Glowing Orange
+        "FE-002 Response Route",
+        true
+      );
+      feRouteGroupRef.current = feRoute;
+      scene.add(feRoute);
+
+      const fe2 = scene.getObjectByName("FE-002");
+      if (fe2) {
+        if (!feControllerRef.current) {
+          const feCtrl = new EmergencyVehicleController(
+            fe2,
+            FE_002_SAFE_ROUTE,
+            EMERGENCY_RESPONDER_SPEED,
+            {
+              onStatusChange: (status) => {
+                onEmergencyStatusChange?.("FE-002", status === "AT_INCIDENT" ? "AT_INCIDENT" : "IN_TRANSIT", 0);
+              },
+              onRouteComplete: () => {
+                onEmergencyStatusChange?.("FE-002", "AT_INCIDENT", 0);
+              },
+            }
+          );
+          feCtrl.setRouteVisual(feRoute);
+          feCtrl.dispatch();
+          feControllerRef.current = feCtrl;
+          onEmergencyStatusChange?.("FE-002", "IN_TRANSIT", 34);
+        }
+      }
+    } else {
+      // Standby / reset
+      tireTracksRef.current?.clear();
+      if (ambControllerRef.current) {
+        ambControllerRef.current.reset(ANCHORS.AMBULANCE.position);
+        ambControllerRef.current = null;
+      } else {
+        const amb = scene.getObjectByName("AMB-001");
+        if (amb) {
+          amb.position.set(ANCHORS.AMBULANCE.position.x, 0.38, ANCHORS.AMBULANCE.position.z);
+          amb.rotation.set(0, 0, 0);
+          TwinAssetLibrary.updateAmbulanceStandby(amb);
+        }
+      }
+
+      if (feControllerRef.current) {
+        feControllerRef.current.reset(ANCHORS.FIRE_EXTINGUISHER_2.position);
+        feControllerRef.current = null;
+      } else {
+        const fe2 = scene.getObjectByName("FE-002");
+        if (fe2) {
+          fe2.position.set(ANCHORS.FIRE_EXTINGUISHER_2.position.x, 0.38, ANCHORS.FIRE_EXTINGUISHER_2.position.z);
+          fe2.rotation.set(0, 0, 0);
+        }
+      }
+
+      onEmergencyStatusChange?.("AMB-001", "STANDBY", 0);
+      onEmergencyStatusChange?.("FE-002", "AVAILABLE", 0);
+    }
+  }, [isFireActive, ambRerouted, onEmergencyStatusChange]);
+
+  // Focus resource when selected via Command Center
+  useEffect(() => {
+    if (!selectedResourceId) return;
+    const match = allWorldObjects.find((o) => o.id === selectedResourceId);
+    if (match) {
+      setSelectedObj(match);
+      if (cameraRef.current) {
+        cameraRef.current.position.set(match.position.x + 12, match.position.y + 14, match.position.z + 12);
+        cameraRef.current.lookAt(match.position.x, match.position.y, match.position.z);
+      }
+    }
+  }, [selectedResourceId, allWorldObjects]);
+
 
   // ── Apply simulation view mode to scene ──────────────────────────────────
   useEffect(() => {
@@ -641,6 +1295,50 @@ export default function VenueTwinViewer({
               </button>
             ))}
           </div>
+
+          {/* Toggle Labels */}
+          <button
+            onClick={handleToggleLabels}
+            title={showLabels ? "Hide 3D Floating Badges (hover still works)" : "Show 3D Floating Badges"}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
+              showLabels
+                ? "bg-cyan-600 text-white border-cyan-500 shadow-sm shadow-cyan-500/20"
+                : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
+            }`}
+          >
+            <Eye className="w-3 h-3" />
+            <span className="hidden sm:inline">Labels: {showLabels ? "ON" : "OFF"}</span>
+          </button>
+
+          {/* Evacuate People */}
+          <button
+            onClick={handleTriggerEvacuate}
+            title="Trigger active crowd evacuation stream towards Central Assembly Area"
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
+              isEvacuating
+                ? "bg-amber-600 text-white border-amber-500 animate-pulse shadow-sm shadow-amber-500/20"
+                : "bg-emerald-950/80 text-emerald-300 border-emerald-700 hover:bg-emerald-900"
+            }`}
+          >
+            <Navigation className="w-3 h-3" />
+            <span className="hidden sm:inline">{isEvacuating ? "Evacuating..." : "Evacuate"}</span>
+          </button>
+
+          {/* Deploy Fire Extinguisher */}
+          {isFireActive && (
+            <button
+              onClick={handleDeployExtinguisher}
+              title="Deploy chemical foam extinguisher from FE-002"
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
+                isExtinguishing
+                  ? "bg-rose-600 text-white border-rose-500 animate-pulse shadow-sm shadow-rose-500/20"
+                  : "bg-rose-950/90 text-rose-300 border-rose-700 hover:bg-rose-900"
+              }`}
+            >
+              <Flame className="w-3 h-3" />
+              <span className="hidden sm:inline">{isExtinguishing ? "Spraying..." : "Extinguisher"}</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowAssetPalette((p) => !p)}
@@ -802,6 +1500,66 @@ export default function VenueTwinViewer({
             {selectedObj.properties.callsign && (
               <Row label="Callsign" value={selectedObj.properties.callsign} mono />
             )}
+
+            {/* Ambulance Unit 3D Inspector (Section 18) */}
+            {selectedObj.type === "ambulance" && (
+              <div className="pt-1.5 border-t border-slate-800 space-y-1">
+                <div className="text-[10px] font-bold text-sky-400 flex items-center gap-1">
+                  <Siren className="w-3 h-3 text-sky-400 animate-pulse" />
+                  EMERGENCY RESOURCE
+                </div>
+                <Row label="Resource" value="Ambulance 01" mono color="cyan" />
+                <Row
+                  label="Status"
+                  value={selectedObj.properties.status || "STANDBY"}
+                  mono
+                  color={selectedObj.properties.status === "STANDBY" ? "emerald" : "rose"}
+                />
+                <Row label="Incident" value={selectedObj.properties.incident_id || "None"} mono color="rose" />
+                <Row label="Route Type" value={selectedObj.properties.route_type || "Emergency Safe Route"} color="cyan" mono />
+                {selectedObj.properties.eta && (
+                  <Row label="ETA" value={`${selectedObj.properties.eta} sec`} color="amber" mono />
+                )}
+                {selectedObj.properties.distance_m && (
+                  <Row label="Route Distance" value={`${selectedObj.properties.distance_m}m`} mono />
+                )}
+                <div className="text-[9px] text-emerald-300 font-mono mt-1 bg-slate-950 p-1.5 rounded border border-emerald-900/50">
+                  {selectedObj.properties.rejection_reason || "Ambulance held at predefined standby post outside fire hazard zone."}
+                </div>
+              </div>
+            )}
+
+            {/* Fire Extinguisher 3D Inspector (Section 18) */}
+            {selectedObj.type === "fire_extinguisher" && (
+              <div className="pt-1.5 border-t border-slate-800 space-y-1">
+                <div className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+                  <Flame className="w-3 h-3 text-amber-400" />
+                  EMERGENCY RESOURCE
+                </div>
+                <Row label="Resource" value={selectedObj.id} mono color="amber" />
+                <Row
+                  label="Status"
+                  value={selectedObj.properties.status || "AVAILABLE"}
+                  mono
+                  color={selectedObj.properties.status === "AVAILABLE" ? "emerald" : "rose"}
+                />
+                <Row label="Location" value={`${selectedObj.properties.building || "Building B"} (Floor ${selectedObj.properties.floor ?? 1})`} />
+                <Row label="Incident" value={selectedObj.properties.incident_id || "None"} mono color="rose" />
+                <Row label="Route Type" value={selectedObj.properties.route_type || "Safe Response Route"} color="cyan" mono />
+                {selectedObj.properties.eta && (
+                  <Row label="ETA" value={`${selectedObj.properties.eta} sec`} color="amber" mono />
+                )}
+                {selectedObj.properties.distance_m && (
+                  <Row label="Distance" value={`${selectedObj.properties.distance_m}m`} mono />
+                )}
+                {selectedObj.properties.selection_rationale && (
+                  <div className="text-[9px] text-amber-300 font-mono mt-1 bg-slate-950 p-1.5 rounded border border-amber-900/50">
+                    {selectedObj.properties.selection_rationale}
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
 
           {selectedObj.type === "gate" && (
@@ -827,6 +1585,104 @@ export default function VenueTwinViewer({
               What-If Scenario → Creates World v2
             </p>
           )}
+        </div>
+      )}
+
+      {/* ── Hovered Building / Block Options Menu Card ──────────────────── */}
+      {hoveredInfo && !selectedObj && (
+        <div
+          style={{
+            left: Math.max(12, Math.min(hoveredInfo.x + 14, (containerRef.current?.clientWidth ?? 700) - 275)),
+            top: Math.max(45, Math.min(hoveredInfo.y + 14, (containerRef.current?.clientHeight ?? 500) - 240)),
+          }}
+          className="absolute z-30 w-64 bg-slate-900/98 border border-cyan-500/60 shadow-2xl rounded-xl p-3 backdrop-blur pointer-events-auto transition-all"
+        >
+          <div className="flex items-start justify-between gap-1.5 border-b border-slate-800 pb-2 mb-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-xl shrink-0">{hoveredInfo.icon}</span>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-white truncate">{hoveredInfo.name}</div>
+                <div className="text-[10px] font-mono text-cyan-400 truncate">{hoveredInfo.blockCode}</div>
+              </div>
+            </div>
+            <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border shrink-0 ${hoveredInfo.statusColor}`}>
+              {hoveredInfo.statusText}
+            </span>
+          </div>
+
+          <p className="text-[10px] text-slate-300 leading-relaxed mb-2.5">
+            {hoveredInfo.description}
+          </p>
+
+          {hoveredInfo.capacity !== undefined && (
+            <div className="flex justify-between items-center text-[10px] text-slate-400 mb-2 border-t border-slate-800/80 pt-1.5">
+              <span>Capacity:</span>
+              <span className="font-mono text-slate-200 font-semibold">{hoveredInfo.capacity.toLocaleString()} occupants</span>
+            </div>
+          )}
+
+          {/* Interactive Options Menu */}
+          <div className="flex flex-col gap-1.5 pt-1.5 border-t border-slate-800">
+            <div className="text-[9px] font-mono text-slate-400 font-semibold uppercase tracking-wider">
+              Options &amp; Actions
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              {hoveredInfo.cameraPreset && (
+                <button
+                  onClick={() => focusCamera(hoveredInfo.cameraPreset!)}
+                  className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-slate-700 transition"
+                >
+                  🎯 Focus View
+                </button>
+              )}
+
+              <button
+                onClick={handleTriggerEvacuate}
+                className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition ${
+                  isEvacuating
+                    ? "bg-amber-900/90 hover:bg-amber-800 text-amber-200 border-amber-600 font-bold"
+                    : "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
+                }`}
+              >
+                🏃 {isEvacuating ? "Evacuating..." : "Evacuate"}
+              </button>
+
+              {isFireActive && (
+                <button
+                  onClick={handleDeployExtinguisher}
+                  className="px-2 py-1.5 rounded bg-rose-900/90 hover:bg-rose-800 text-rose-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-rose-600 transition"
+                >
+                  🧯 Extinguish
+                </button>
+              )}
+
+              {hoveredInfo.isGate && hoveredInfo.id && (
+                <button
+                  onClick={() => onToggleGateBlock(hoveredInfo.id)}
+                  className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition ${
+                    hoveredInfo.isBlocked
+                      ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
+                      : "bg-rose-950/90 hover:bg-rose-900 text-rose-300 border-rose-700"
+                  }`}
+                >
+                  {hoveredInfo.isBlocked ? "🟢 Open Gate" : "⛔ Block Gate"}
+                </button>
+              )}
+
+              {hoveredInfo.obj && (
+                <button
+                  onClick={() => {
+                    setSelectedObj(hoveredInfo.obj!);
+                    onSelectObject?.(hoveredInfo.obj!);
+                  }}
+                  className="px-2 py-1.5 rounded bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 text-[10px] font-medium flex items-center justify-center gap-1 border border-indigo-700 col-span-2 transition"
+                >
+                  🔍 Inspect Details
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

@@ -72,3 +72,4 @@ except Exception as e:
     print("[NOTE] EventFlow automatically falls back to local context table fallback if YugabyteDB is offline.")
     print("       To connect to YugabyteDB Aeon Cloud, verify your cluster hostname in .env:\n")
     print("       DATABASE_URL=postgresql://notyouridea:Das%4012345@<YOUR_CLUSTER_HOST>:5433/yugabyte?sslmode=require\n")
+

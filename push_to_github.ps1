@@ -35,3 +35,4 @@ Write-Host "Pushing to https://github.com/himangs02/NotYourPlan.git (branch: mai
 git push -u origin main
 
 Write-Host "`nPush operation completed!" -ForegroundColor Green
+

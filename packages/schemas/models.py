@@ -141,3 +141,93 @@ class ActionPlan(BaseModel):
     assumptions: List[str]
     language: Literal["en", "hi"] = "en"
     translated_checklist: Optional[List[Dict[str, str]]] = None
+
+# ==========================================
+# Phase 1: Emergency Resource & Routing Models
+# ==========================================
+
+EmergencyResourceType = Literal["AMBULANCE", "FIRE_EXTINGUISHER", "FIRE_RESPONSE_TEAM"]
+
+EmergencyResourceStatus = Literal[
+    "STANDBY",
+    "DISPATCHED",
+    "EN_ROUTE",
+    "AT_INCIDENT",
+    "RETURNING",
+    "AVAILABLE",
+    "ASSIGNED",
+    "IN_TRANSIT",
+    "USED",
+    "UNAVAILABLE"
+]
+
+class EmergencyResource(BaseModel):
+    id: str
+    type: EmergencyResourceType
+    name: str
+    status: EmergencyResourceStatus
+    location: str
+    building: Optional[str] = None
+    floor: Optional[int] = None
+    availability: Literal["AVAILABLE", "ASSIGNED", "DISPATCHED", "UNAVAILABLE"] = "AVAILABLE"
+    capacity: Optional[int] = None
+    assigned_incident: Optional[str] = None
+    current_route: Optional[List[str]] = None
+    destination: Optional[str] = None
+    eta: Optional[int] = None
+    last_updated: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    coordinates: Optional[Dict[str, float]] = None
+
+class EmergencyIncident(BaseModel):
+    id: str = "EV-001"
+    type: str = "FIRE"
+    location: str = "Main Auditorium Hall"
+    building: str = "Building B"
+    floor: int = 2
+    status: Literal["ACTIVE", "EXTINGUISHED", "STANDBY"] = "ACTIVE"
+    coordinates: Dict[str, float] = Field(default_factory=lambda: {"x": 0.0, "y": 2.0, "z": 0.0})
+    hazard_radius_meters: float = 14.0
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+class EmergencyWaypoint(BaseModel):
+    node_id: str
+    label: str
+    x: float
+    y: float
+    z: float
+
+class EmergencyRoute(BaseModel):
+    route_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    resource_id: str
+    incident_id: str
+    world_version: int = 1
+    route: List[str]
+    waypoints: List[Dict[str, Any]] = Field(default_factory=list)
+    distance_meters: float
+    estimated_time_seconds: int
+    safe: bool = True
+    hazards: List[str] = Field(default_factory=list)
+    blocked_segments: List[str] = Field(default_factory=list)
+    rejection_reason: Optional[str] = None
+    provenance: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+class EmergencyNotification(BaseModel):
+    notification_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    incident_id: str
+    resource_id: str
+    title: str
+    message: str
+    priority: Literal["CRITICAL", "HIGH", "STANDARD"] = "CRITICAL"
+    eta_seconds: int
+    route_summary: str
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+class EmergencyDispatch(BaseModel):
+    dispatch_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    resource_id: str
+    incident_id: str
+    dispatched_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    status: str = "DISPATCHED"
+    route_id: Optional[str] = None
+
