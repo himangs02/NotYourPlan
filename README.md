@@ -159,36 +159,89 @@ All plans run across seeds `42, 101, 777`:
 
 ---
 
-## 8. How to Run
+## 8. How to Start the App
 
-### Setup Environment
+### Prerequisites
+- **Node.js** (v18 or higher) & **npm**
+- **Python** (3.10 to 3.13) & **pip**
+- *(Optional)* **Docker & Docker Compose** for containerized execution
+- *(Optional)* **Eclipse SUMO** (if not installed, EventFlow automatically uses its calibrated internal physics fallback)
+
+---
+
+### Method A: Local Development (Recommended)
+
+#### Step 1: Clone & Configure Environment
 ```bash
+git clone https://github.com/himangs02/NotYourPlan.git
+cd NotYourPlan
+
+# Copy sample environment configuration
 cp .env.example .env
 ```
+*(On Windows PowerShell, use `Copy-Item .env.example .env`)*
 
-### 1. Run Automated Tests (13/13 Pass)
+#### Step 2: Start the Python FastAPI Backend
+Open a terminal in the project root:
 ```bash
-python -m pytest tests/ -v
+# 1. Install Python dependencies
+pip install -r apps/api/requirements.txt
+
+# 2. Start the API server on port 8000
+python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+- **Backend API URL:** `http://localhost:8000`
+- **Interactive Swagger Docs:** `http://localhost:8000/docs`
 
-### 2. Run Next.js Production Build
+#### Step 3: Start the Next.js Frontend
+Open a **second terminal** in the project root:
 ```bash
-npm run build --prefix apps/web
-```
+# 1. Install frontend dependencies
+npm install --prefix apps/web
 
-### 3. Start Development Server
-```bash
+# 2. Start the development server
 npm run dev --prefix apps/web
 ```
 Open **`http://localhost:3000`** in your browser.
 
-### 4. Or Run via Docker Compose
+> **Tip:** If port 3000 is in use, start on another port:
+> ```bash
+> npm run dev --prefix apps/web -- -p 3001
+> ```
+
+---
+
+### Method B: One-Command Automated Setup (Windows PowerShell)
+
+We provide an automated setup script that copies the 3D model, verifies files, runs the test suite, and builds the app:
+```powershell
+powershell -ExecutionPolicy Bypass -File setup_city_glb.ps1
+```
+Then start the dev server:
+```powershell
+npm run dev --prefix apps/web
+```
+
+---
+
+### Method C: Docker Compose (Full Stack with YugabyteDB)
+
+To spin up the entire stack (FastAPI Backend, Next.js UI, and distributed YugabyteDB cluster) with a single command:
 ```bash
 docker compose up --build
 ```
-- Frontend Web App: `http://localhost:3000`
-- FastAPI Backend: `http://localhost:8000` (Swagger docs at `/docs`)
-- YugabyteDB Console: `http://localhost:7000`
+- **Frontend Command Center:** `http://localhost:3000`
+- **FastAPI API & Docs:** `http://localhost:8000` (`http://localhost:8000/docs`)
+- **YugabyteDB Admin Console:** `http://localhost:7000`
+
+---
+
+### Method D: Running Verification Tests
+EventFlow includes 13 deterministic validation and constraint tests:
+```bash
+python -m pytest tests/ -v
+```
+All 13 tests verify goal parsing, DSL schemas, hard safety constraints, emergency delay limits, accessibility violations, and provenance tracking.
 
 ---
 
