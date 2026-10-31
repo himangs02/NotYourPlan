@@ -133,11 +133,14 @@ export default function VenueTwinViewer({
   const [showAssetPalette, setShowAssetPalette] = useState(false);
   const [addedObjects, setAddedObjects] = useState<SemanticWorldObject[]>([]);
 
-  // Features: Hide marks by default, hover block menu, fire extinguisher, crowd evacuation
+  // Features: Hide marks by default, hover/click block menu, fire extinguisher, crowd evacuation
   const [showLabels, setShowLabels] = useState(false);
   const [isEvacuating, setIsEvacuating] = useState(externalIsEvacuating);
   const [isExtinguishing, setIsExtinguishing] = useState(false);
   const [hoveredInfo, setHoveredInfo] = useState<HoveredBlockInfo | null>(null);
+  const [pinnedBlock, setPinnedBlock] = useState<HoveredBlockInfo | null>(null);
+  const [showInspectorDetails, setShowInspectorDetails] = useState(false);
+  const pinnedBlockRef = useRef<HoveredBlockInfo | null>(null);
 
   // Sync external evacuation prop if provided
   useEffect(() => {
@@ -626,7 +629,15 @@ export default function VenueTwinViewer({
       camera.position.set(x, Math.max(8, y), z);
       camera.lookAt(0, 0, 10);
     };
-    const onMouseDown = (e: MouseEvent) => { if (e.button === 0) { isDragging = true; prevMouseX = e.clientX; prevMouseY = e.clientY; } };
+    let mouseDownPos = { x: 0, y: 0 };
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) {
+        isDragging = true;
+        prevMouseX = e.clientX;
+        prevMouseY = e.clientY;
+        mouseDownPos = { x: e.clientX, y: e.clientY };
+      }
+    };
     const onMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
       spherical.theta -= (e.clientX - prevMouseX) * 0.007;
@@ -653,10 +664,72 @@ export default function VenueTwinViewer({
 
     const onPointerMove = (e: MouseEvent) => {
       if (isDragging) {
-        setHoveredInfo(null);
-        if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+        if (!pinnedBlockRef.current) {
+          setHoveredInfo(null);
+          if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+        }
         return;
       }
+      const rect = domElem.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      // 1. Check semantic objects
+      const semHits = raycaster.intersectObjects(objectsGroup.children, true);
+      if (semHits.length > 0) {
+        let cur: THREE.Object3D | null = semHits[0].object;
+        while (cur && !cur.userData?.semanticObject && cur.parent && cur !== objectsGroup) {
+          cur = cur.parent;
+        }
+        if (cur?.userData?.semanticObject) {
+          const obj = cur.userData.semanticObject as SemanticWorldObject;
+          if (!pinnedBlockRef.current && hoverOutlineRef.current) {
+            hoverOutlineRef.current.setFromObject(cur);
+            hoverOutlineRef.current.visible = true;
+          }
+          const info = getBlockInfoFromSemantic(obj, e.clientX - rect.left, e.clientY - rect.top);
+          setHoveredInfo(info);
+          return;
+        }
+      }
+
+      // 2. Check GLB city environment buildings
+      const cityHits = raycaster.intersectObjects(cityGroup.children, true);
+      if (cityHits.length > 0 && cityHits[0].point.y > 0.4) {
+        const pt = cityHits[0].point;
+        if (!pinnedBlockRef.current && hoverOutlineRef.current && cityHits[0].object) {
+          hoverOutlineRef.current.setFromObject(cityHits[0].object);
+          hoverOutlineRef.current.visible = true;
+        }
+        const info = getBlockInfoFromPoint(pt, e.clientX - rect.left, e.clientY - rect.top);
+        if (info) {
+          setHoveredInfo(info);
+          return;
+        }
+      }
+
+      if (!pinnedBlockRef.current) {
+        if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+        setHoveredInfo(null);
+      }
+    };
+
+    const onPointerLeave = () => {
+      if (!pinnedBlockRef.current) {
+        setHoveredInfo(null);
+        if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+      }
+    };
+
+    domElem.addEventListener("mousemove", onPointerMove);
+    domElem.addEventListener("mouseleave", onPointerLeave);
+
+    const onClick = (e: MouseEvent) => {
+      // Ignore click if user was dragging/orbiting the camera
+      const dragDist = Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y);
+      if (dragDist > 6) return;
+
       const rect = domElem.getBoundingClientRect();
       mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -676,7 +749,10 @@ export default function VenueTwinViewer({
             hoverOutlineRef.current.visible = true;
           }
           const info = getBlockInfoFromSemantic(obj, e.clientX - rect.left, e.clientY - rect.top);
-          setHoveredInfo(info);
+          setPinnedBlock(info);
+          pinnedBlockRef.current = info;
+          setSelectedObj(obj);
+          onSelectObject?.(obj);
           return;
         }
       }
@@ -691,38 +767,23 @@ export default function VenueTwinViewer({
         }
         const info = getBlockInfoFromPoint(pt, e.clientX - rect.left, e.clientY - rect.top);
         if (info) {
-          setHoveredInfo(info);
+          setPinnedBlock(info);
+          pinnedBlockRef.current = info;
+          if (info.obj) {
+            setSelectedObj(info.obj);
+            onSelectObject?.(info.obj);
+          } else {
+            setSelectedObj(null);
+          }
           return;
         }
       }
 
+      // Clicked on ground / empty space: unpin block
+      setPinnedBlock(null);
+      pinnedBlockRef.current = null;
+      setSelectedObj(null);
       if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
-      setHoveredInfo(null);
-    };
-
-    const onPointerLeave = () => {
-      setHoveredInfo(null);
-      if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
-    };
-
-    domElem.addEventListener("mousemove", onPointerMove);
-    domElem.addEventListener("mouseleave", onPointerLeave);
-
-    const onClick = (e: MouseEvent) => {
-      const rect = domElem.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(objectsGroup.children, true);
-      if (hits.length > 0) {
-        let cur: THREE.Object3D | null = hits[0].object;
-        while (cur && !cur.userData?.semanticObject && cur.parent) cur = cur.parent;
-        if (cur?.userData?.semanticObject) {
-          const obj = cur.userData.semanticObject as SemanticWorldObject;
-          setSelectedObj(obj);
-          onSelectObject?.(obj);
-        }
-      }
     };
     domElem.addEventListener("click", onClick);
 
@@ -1452,186 +1513,82 @@ export default function VenueTwinViewer({
         </div>
       )}
 
-      {/* ── Semantic Inspector Card ──────────────────────────────────────── */}
-      {selectedObj && (
-        <div className="absolute bottom-10 right-2 z-20 w-60 bg-slate-900/97 border border-slate-700 rounded-lg p-3 shadow-2xl backdrop-blur flex flex-col gap-2 text-xs">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-            <span className="font-bold text-slate-100 flex items-center gap-1.5 text-[11px]">
-              <MapPin className="w-3 h-3 text-indigo-400" />{selectedObj.name}
-            </span>
-            <button onClick={() => setSelectedObj(null)} className="text-slate-400 hover:text-white"><X className="w-3 h-3" /></button>
-          </div>
-
-          <div className="space-y-1 text-[10px] text-slate-300">
-            <Row label="Object ID" value={selectedObj.id} mono />
-            <Row label="Type" value={selectedObj.type.toUpperCase()} mono color="cyan" />
-            <Row
-              label="Status"
-              value={selectedObj.properties.status}
-              mono
-              color={
-                selectedObj.properties.status === "BLOCKED" || selectedObj.properties.is_blocked ? "rose"
-                : selectedObj.properties.status === "CONGESTED" ? "amber"
-                : "emerald"
-              }
-            />
-            {selectedObj.properties.width_m && <Row label="Width" value={`${selectedObj.properties.width_m} m`} />}
-            {selectedObj.properties.flow_capacity_ped_per_sec && (
-              <Row label="Flow" value={`${selectedObj.properties.flow_capacity_ped_per_sec} ped/sec`} />
-            )}
-            {selectedObj.properties.capacity && (
-              <Row label="Capacity" value={selectedObj.properties.capacity.toLocaleString()} mono />
-            )}
-            {selectedObj.properties.is_step_free && <Row label="Access" value="STEP-FREE ✓" color="cyan" mono />}
-            {selectedObj.properties.is_emergency_corridor && (
-              <Row label="Corridor" value="EMERGENCY MEDICAL" color="rose" mono />
-            )}
-            {selectedObj.id === "road_17" && (
-              <Row label="Constraint" value="≤30s Ambulance Delay" color="amber" mono />
-            )}
-            {selectedObj.id === "road_17" && planMetrics && (
-              <Row
-                label="Current Delay"
-                value={`${planMetrics.ambDelaySec}s ${planMetrics.ambDelayOk ? "✓ PASS" : "✗ FAIL"}`}
-                color={planMetrics.ambDelayOk ? "emerald" : "rose"}
-                mono
-              />
-            )}
-            {selectedObj.properties.callsign && (
-              <Row label="Callsign" value={selectedObj.properties.callsign} mono />
-            )}
-
-            {/* Ambulance Unit 3D Inspector (Section 18) */}
-            {selectedObj.type === "ambulance" && (
-              <div className="pt-1.5 border-t border-slate-800 space-y-1">
-                <div className="text-[10px] font-bold text-sky-400 flex items-center gap-1">
-                  <Siren className="w-3 h-3 text-sky-400 animate-pulse" />
-                  EMERGENCY RESOURCE
-                </div>
-                <Row label="Resource" value="Ambulance 01" mono color="cyan" />
-                <Row
-                  label="Status"
-                  value={selectedObj.properties.status || "STANDBY"}
-                  mono
-                  color={selectedObj.properties.status === "STANDBY" ? "emerald" : "rose"}
-                />
-                <Row label="Incident" value={selectedObj.properties.incident_id || "None"} mono color="rose" />
-                <Row label="Route Type" value={selectedObj.properties.route_type || "Emergency Safe Route"} color="cyan" mono />
-                {selectedObj.properties.eta && (
-                  <Row label="ETA" value={`${selectedObj.properties.eta} sec`} color="amber" mono />
-                )}
-                {selectedObj.properties.distance_m && (
-                  <Row label="Route Distance" value={`${selectedObj.properties.distance_m}m`} mono />
-                )}
-                <div className="text-[9px] text-emerald-300 font-mono mt-1 bg-slate-950 p-1.5 rounded border border-emerald-900/50">
-                  {selectedObj.properties.rejection_reason || "Ambulance held at predefined standby post outside fire hazard zone."}
-                </div>
-              </div>
-            )}
-
-            {/* Fire Extinguisher 3D Inspector (Section 18) */}
-            {selectedObj.type === "fire_extinguisher" && (
-              <div className="pt-1.5 border-t border-slate-800 space-y-1">
-                <div className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
-                  <Flame className="w-3 h-3 text-amber-400" />
-                  EMERGENCY RESOURCE
-                </div>
-                <Row label="Resource" value={selectedObj.id} mono color="amber" />
-                <Row
-                  label="Status"
-                  value={selectedObj.properties.status || "AVAILABLE"}
-                  mono
-                  color={selectedObj.properties.status === "AVAILABLE" ? "emerald" : "rose"}
-                />
-                <Row label="Location" value={`${selectedObj.properties.building || "Building B"} (Floor ${selectedObj.properties.floor ?? 1})`} />
-                <Row label="Incident" value={selectedObj.properties.incident_id || "None"} mono color="rose" />
-                <Row label="Route Type" value={selectedObj.properties.route_type || "Safe Response Route"} color="cyan" mono />
-                {selectedObj.properties.eta && (
-                  <Row label="ETA" value={`${selectedObj.properties.eta} sec`} color="amber" mono />
-                )}
-                {selectedObj.properties.distance_m && (
-                  <Row label="Distance" value={`${selectedObj.properties.distance_m}m`} mono />
-                )}
-                {selectedObj.properties.selection_rationale && (
-                  <div className="text-[9px] text-amber-300 font-mono mt-1 bg-slate-950 p-1.5 rounded border border-amber-900/50">
-                    {selectedObj.properties.selection_rationale}
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-
-          {selectedObj.type === "gate" && (
-            <button
-              onClick={() => onToggleGateBlock(selectedObj.id)}
-              className={`mt-1 w-full py-1.5 px-3 rounded text-xs font-bold transition flex items-center justify-center gap-1.5 shadow ${
-                selectedObj.properties.is_blocked || selectedObj.properties.status === "BLOCKED"
-                  ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                  : "bg-rose-600 hover:bg-rose-500 text-white"
-              }`}
-            >
-              {selectedObj.properties.is_blocked || selectedObj.properties.status === "BLOCKED" ? (
-                <><RotateCcw className="w-3 h-3" />Unblock {selectedObj.name.split(" ")[0]}</>
-              ) : (
-                <><AlertTriangle className="w-3 h-3" />Block {selectedObj.name.split(" ")[0]} (What-If)</>
-              )}
-            </button>
-          )}
-
-          {/* What-If label for gates */}
-          {selectedObj.type === "gate" && !(selectedObj.properties.is_blocked) && (
-            <p className="text-[9px] text-slate-500 font-mono text-center">
-              What-If Scenario → Creates World v2
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* ── Hovered Building / Block Options Menu Card ──────────────────── */}
-      {hoveredInfo && !selectedObj && (
+      {/* ── Building / Block Options Menu Card (Click to Pin or Hover to Preview) ── */}
+      {(pinnedBlock || hoveredInfo) && (
         <div
           style={{
-            left: Math.max(12, Math.min(hoveredInfo.x + 14, (containerRef.current?.clientWidth ?? 700) - 275)),
-            top: Math.max(45, Math.min(hoveredInfo.y + 14, (containerRef.current?.clientHeight ?? 500) - 240)),
+            left: Math.max(12, Math.min((pinnedBlock || hoveredInfo)!.x + 14, (containerRef.current?.clientWidth ?? 700) - 290)),
+            top: Math.max(45, Math.min((pinnedBlock || hoveredInfo)!.y + 14, (containerRef.current?.clientHeight ?? 500) - 290)),
           }}
-          className="absolute z-30 w-64 bg-slate-900/98 border border-cyan-500/60 shadow-2xl rounded-xl p-3 backdrop-blur pointer-events-auto transition-all"
+          className={`absolute z-30 w-72 bg-slate-900/98 border shadow-2xl rounded-xl p-3.5 backdrop-blur pointer-events-auto transition-all ${
+            pinnedBlock
+              ? "border-cyan-400 shadow-cyan-500/20 ring-1 ring-cyan-500/30"
+              : "border-slate-700/80 shadow-black/60"
+          }`}
         >
+          {/* Header */}
           <div className="flex items-start justify-between gap-1.5 border-b border-slate-800 pb-2 mb-2">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xl shrink-0">{hoveredInfo.icon}</span>
+              <span className="text-xl shrink-0">{(pinnedBlock || hoveredInfo)!.icon}</span>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-white truncate">{hoveredInfo.name}</div>
-                <div className="text-[10px] font-mono text-cyan-400 truncate">{hoveredInfo.blockCode}</div>
+                <div className="text-xs font-bold text-white truncate">
+                  {(pinnedBlock || hoveredInfo)!.name}
+                </div>
+                <div className="text-[10px] font-mono text-cyan-400 truncate">{(pinnedBlock || hoveredInfo)!.blockCode}</div>
               </div>
             </div>
-            <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border shrink-0 ${hoveredInfo.statusColor}`}>
-              {hoveredInfo.statusText}
-            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {pinnedBlock && (
+                <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700">
+                  📌 PINNED
+                </span>
+              )}
+              {pinnedBlock ? (
+                <button
+                  onClick={() => {
+                    setPinnedBlock(null);
+                    pinnedBlockRef.current = null;
+                    setSelectedObj(null);
+                    if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+                  }}
+                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  title="Close / Unpin Card"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border ${(pinnedBlock || hoveredInfo)!.statusColor}`}>
+                  {(pinnedBlock || hoveredInfo)!.statusText}
+                </span>
+              )}
+            </div>
           </div>
 
           <p className="text-[10px] text-slate-300 leading-relaxed mb-2.5">
-            {hoveredInfo.description}
+            {(pinnedBlock || hoveredInfo)!.description}
           </p>
 
-          {hoveredInfo.capacity !== undefined && (
+          {(pinnedBlock || hoveredInfo)!.capacity !== undefined && (
             <div className="flex justify-between items-center text-[10px] text-slate-400 mb-2 border-t border-slate-800/80 pt-1.5">
               <span>Capacity:</span>
-              <span className="font-mono text-slate-200 font-semibold">{hoveredInfo.capacity.toLocaleString()} occupants</span>
+              <span className="font-mono text-slate-200 font-semibold">{(pinnedBlock || hoveredInfo)!.capacity!.toLocaleString()} occupants</span>
             </div>
           )}
 
           {/* Interactive Options Menu */}
           <div className="flex flex-col gap-1.5 pt-1.5 border-t border-slate-800">
-            <div className="text-[9px] font-mono text-slate-400 font-semibold uppercase tracking-wider">
-              Options &amp; Actions
+            <div className="text-[9px] font-mono text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+              <span>Options &amp; Actions</span>
+              {!pinnedBlock && (
+                <span className="text-[8px] text-cyan-400 font-sans normal-case">Click block to pin options</span>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-1.5">
-              {hoveredInfo.cameraPreset && (
+              {(pinnedBlock || hoveredInfo)!.cameraPreset && (
                 <button
-                  onClick={() => focusCamera(hoveredInfo.cameraPreset!)}
-                  className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-slate-700 transition"
+                  onClick={() => focusCamera((pinnedBlock || hoveredInfo)!.cameraPreset!)}
+                  className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-slate-700 transition shadow-sm"
                 >
                   🎯 Focus View
                 </button>
@@ -1639,9 +1596,9 @@ export default function VenueTwinViewer({
 
               <button
                 onClick={handleTriggerEvacuate}
-                className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition ${
+                className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition shadow-sm ${
                   isEvacuating
-                    ? "bg-amber-900/90 hover:bg-amber-800 text-amber-200 border-amber-600 font-bold"
+                    ? "bg-amber-900/90 hover:bg-amber-800 text-amber-200 border-amber-600 font-bold animate-pulse"
                     : "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
                 }`}
               >
@@ -1651,37 +1608,55 @@ export default function VenueTwinViewer({
               {isFireActive && (
                 <button
                   onClick={handleDeployExtinguisher}
-                  className="px-2 py-1.5 rounded bg-rose-900/90 hover:bg-rose-800 text-rose-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-rose-600 transition"
+                  className="px-2 py-1.5 rounded bg-rose-900/90 hover:bg-rose-800 text-rose-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-rose-600 transition shadow-sm"
                 >
                   🧯 Extinguish
                 </button>
               )}
 
-              {hoveredInfo.isGate && hoveredInfo.id && (
+              {(pinnedBlock || hoveredInfo)!.isGate && (pinnedBlock || hoveredInfo)!.id && (
                 <button
-                  onClick={() => onToggleGateBlock(hoveredInfo.id)}
-                  className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition ${
-                    hoveredInfo.isBlocked
+                  onClick={() => onToggleGateBlock((pinnedBlock || hoveredInfo)!.id)}
+                  className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition shadow-sm ${
+                    (pinnedBlock || hoveredInfo)!.isBlocked
                       ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
                       : "bg-rose-950/90 hover:bg-rose-900 text-rose-300 border-rose-700"
                   }`}
                 >
-                  {hoveredInfo.isBlocked ? "🟢 Open Gate" : "⛔ Block Gate"}
+                  {(pinnedBlock || hoveredInfo)!.isBlocked ? "🟢 Open Gate" : "⛔ Block Gate"}
                 </button>
               )}
 
-              {hoveredInfo.obj && (
+              {(pinnedBlock || hoveredInfo)!.obj && (
                 <button
-                  onClick={() => {
-                    setSelectedObj(hoveredInfo.obj!);
-                    onSelectObject?.(hoveredInfo.obj!);
-                  }}
-                  className="px-2 py-1.5 rounded bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 text-[10px] font-medium flex items-center justify-center gap-1 border border-indigo-700 col-span-2 transition"
+                  onClick={() => setShowInspectorDetails((p) => !p)}
+                  className="px-2 py-1.5 rounded bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 text-[10px] font-medium flex items-center justify-center gap-1 border border-indigo-700 col-span-2 transition shadow-sm"
                 >
-                  🔍 Inspect Details
+                  {showInspectorDetails ? "▲ Hide Technical Specs" : "🔍 Inspect Technical Specs"}
                 </button>
               )}
             </div>
+
+            {/* Expanded Detailed Properties when Inspect Technical Specs is clicked */}
+            {showInspectorDetails && (pinnedBlock || hoveredInfo)!.obj && (
+              <div className="mt-2 pt-2 border-t border-slate-800 text-[9px] space-y-1 text-slate-300 font-mono">
+                <Row label="ID" value={(pinnedBlock || hoveredInfo)!.obj!.id} mono />
+                <Row label="Type" value={(pinnedBlock || hoveredInfo)!.obj!.type.toUpperCase()} mono color="cyan" />
+                <Row label="Status" value={(pinnedBlock || hoveredInfo)!.statusText} mono />
+                {(pinnedBlock || hoveredInfo)!.obj!.properties.width_m && (
+                  <Row label="Width" value={`${(pinnedBlock || hoveredInfo)!.obj!.properties.width_m} m`} />
+                )}
+                {(pinnedBlock || hoveredInfo)!.obj!.properties.flow_capacity_ped_per_sec && (
+                  <Row label="Flow" value={`${(pinnedBlock || hoveredInfo)!.obj!.properties.flow_capacity_ped_per_sec} ped/sec`} />
+                )}
+                {(pinnedBlock || hoveredInfo)!.obj!.properties.is_step_free && (
+                  <Row label="Access" value="STEP-FREE ✓" color="cyan" mono />
+                )}
+                {(pinnedBlock || hoveredInfo)!.obj!.properties.is_emergency_corridor && (
+                  <Row label="Corridor" value="EMERGENCY ROUTE" color="rose" mono />
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
