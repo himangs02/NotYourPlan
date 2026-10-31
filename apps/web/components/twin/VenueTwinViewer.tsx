@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import {
   RotateCcw, Layers, AlertTriangle, Plus, MapPin, X, Loader2,
-  Activity, Shield, Eye, Zap
+  Activity, Shield, Eye, Zap, Flame
 } from "lucide-react";
 import { SemanticWorldObject, CameraViewMode, SimViewMode, PlanMetrics3D } from "./types";
 import { TwinAssetLibrary } from "./AssetLibrary";
@@ -36,6 +36,8 @@ interface VenueTwinViewerProps {
   isSimulating?: boolean;
   planMetrics?: PlanMetrics3D | null;
   selectedPlanId?: string;
+  isFireActive?: boolean;
+  onToggleFire?: () => void;
 }
 
 export default function VenueTwinViewer({
@@ -49,6 +51,8 @@ export default function VenueTwinViewer({
   isSimulating = false,
   planMetrics = null,
   selectedPlanId = "",
+  isFireActive = false,
+  onToggleFire,
 }: VenueTwinViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -56,6 +60,7 @@ export default function VenueTwinViewer({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const objectsGroupRef = useRef<THREE.Group | null>(null);
   const crowdGroupRef = useRef<THREE.Group | null>(null);
+  const fireGroupRef = useRef<THREE.Group | null>(null);
   const cityGroupRef = useRef<THREE.Group | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(performance.now());
@@ -325,9 +330,16 @@ export default function VenueTwinViewer({
       lastFrameTimeRef.current = now;
       angle += 0.02;
 
-      // Pulse ambulance beacon
+      // Drive moving ambulance along Road 17 emergency corridor
       const amb = scene.getObjectByName("ambulance_unit_1");
-      if (amb) amb.position.y = Math.sin(angle * 2) * 0.05;
+      if (amb) {
+        TwinAssetLibrary.updateAmbulanceAnimation(dt, amb as THREE.Group);
+      }
+
+      // Animate fire particles & flame flickering
+      if (fireGroupRef.current) {
+        TwinAssetLibrary.updateFireEffect(dt, fireGroupRef.current);
+      }
 
       // Animate crowd
       if (attendeeMeshRef.current && wheelMeshRef.current) {
@@ -458,6 +470,28 @@ export default function VenueTwinViewer({
     root.add(group);
   }, [allWorldObjects, selectedObj, highlightedElementId, blockedGate]);
 
+  // Synchronize 3D Fire Simulation in Main Auditorium
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const scene = sceneRef.current;
+
+    const existingFire = scene.getObjectByName("fire_simulation_system");
+    if (existingFire) {
+      existingFire.removeFromParent();
+      fireGroupRef.current = null;
+    }
+
+    if (isFireActive) {
+      const fire = TwinAssetLibrary.createFireEffect(ANCHORS.AUDITORIUM.position);
+      fire.name = "fire_simulation_system";
+      fireGroupRef.current = fire;
+      scene.add(fire);
+      TwinAssetLibrary.setFireState(true, blockedGate === "gate_2");
+    } else {
+      TwinAssetLibrary.setFireState(false, blockedGate === "gate_2");
+    }
+  }, [isFireActive, blockedGate]);
+
   // ── Apply simulation view mode to scene ──────────────────────────────────
   useEffect(() => {
     if (!sceneRef.current) return;
@@ -558,7 +592,7 @@ export default function VenueTwinViewer({
       : "bg-slate-800 text-slate-400 hover:text-white";
 
   return (
-    <div className="relative w-full aspect-square bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex flex-col select-none">
+    <div className="relative w-full aspect-square lg:aspect-[16/10] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex flex-col select-none">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="absolute top-0 left-0 right-0 z-10 px-3 py-2 bg-slate-900/90 backdrop-blur border-b border-slate-800 flex items-center justify-between gap-2">

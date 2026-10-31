@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 const VenueTwinViewer = dynamic(() => import("../components/twin/VenueTwinViewer"), {
   ssr: false,
   loading: () => (
-    <div className="w-full aspect-square bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-mono text-xs">
+    <div className="w-full aspect-square lg:aspect-[16/10] bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center text-slate-400 font-mono text-xs">
       Initializing 3D Digital Twin...
     </div>
   ),
@@ -27,7 +27,8 @@ import {
   FileText,
   Languages,
   Database,
-  Sliders
+  Sliders,
+  Flame
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -71,6 +72,7 @@ export default function EventFlowCommandCenter() {
   const [worldVersion, setWorldVersion] = useState("World v1: Baseline Layout");
   const [worldVersionId, setWorldVersionId] = useState("world-v1-original");
   const [blockedGate, setBlockedGate] = useState<string | null>(null);
+  const [isFireActive, setIsFireActive] = useState(false);
   const [highlightedElementId, setHighlightedElementId] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState("plan_b");
@@ -555,8 +557,9 @@ export default function EventFlowCommandCenter() {
 
       {/* Main Command Center Grid */}
       <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1720px] mx-auto w-full">
-        {/* LEFT COLUMN: Goal Ingestion & Constraint Chips */}
+                        {/* LEFT COLUMN: Event Goal & Constraints, Core Candidate Plans, Evidence & Human Impact */}
         <div className="lg:col-span-4 flex flex-col gap-6">
+
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
@@ -643,6 +646,132 @@ export default function EventFlowCommandCenter() {
             </button>
           </div>
 
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-400" />
+                <h2 className="font-semibold text-sm text-white">Core Candidate Plans</h2>
+              </div>
+              <span className="text-[11px] font-mono text-slate-400">
+                Score: Lower is Better
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              {plans.map((p) => {
+                const isSelected = p.plan_id === selectedPlanId;
+                const isPass = p.status === "PASS";
+
+                return (
+                  <div
+                    key={p.plan_id}
+                    onClick={() => setSelectedPlanId(p.plan_id)}
+                    className={`p-3.5 rounded-lg border transition cursor-pointer flex flex-col gap-2 ${isSelected
+                        ? "bg-slate-800/90 border-indigo-500 shadow-md shadow-indigo-500/10"
+                        : "bg-slate-950/70 border-slate-800 hover:border-slate-700"
+                      }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs text-slate-100">
+                        {p.name}
+                      </span>
+                      <span
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${isPass
+                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                            : "bg-rose-950 text-rose-300 border border-rose-800"
+                          }`}
+                      >
+                        {p.status}
+                      </span>
+                    </div>
+
+                    {isPass ? (
+                      <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-300">
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">P95 Exit</span>
+                          <span className="font-mono font-bold text-slate-100">{p.aggregate_metrics.p95_exit_time_display}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Step-Free</span>
+                          <span className="text-emerald-400 font-bold">PASS</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Score</span>
+                          <span className="font-mono font-bold text-indigo-400">{p.final_score?.toFixed(3)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-rose-400 bg-rose-950/30 p-2 rounded border border-rose-900/30">
+                        {p.rejection_reasons?.[0] || "Hard constraint failed"}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
+                      <span>Seeds: 42, 101, 777 (SUMO 1.21.0)</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveProvenanceData(p.provenance);
+                          setShowProvenanceDrawer(true);
+                        }}
+                        className="text-indigo-400 hover:text-indigo-300 hover:underline"
+                      >
+                        Evidence &rarr;
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+
+          {/* Selected Plan Evidence */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-indigo-400" />
+                <h2 className="font-semibold text-sm text-white">Selected Plan Evidence</h2>
+              </div>
+              <span className="text-[11px] font-mono text-indigo-400">YugabyteDB Provenance</span>
+            </div>
+
+            <div className="text-xs space-y-2 text-slate-300">
+              <div className="flex justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-400">Active Plan:</span>
+                <span className="font-mono font-semibold">{activePlan.name}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-400">Status:</span>
+                <span className={activePlan.status === "PASS" ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
+                  {activePlan.status}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-400">Deterministic Cost Score:</span>
+                <span className="font-mono font-bold text-indigo-400">{activePlan.final_score ?? "N/A (Failed Hard Checks)"}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800">
+                <span className="text-slate-400">Marshals Required:</span>
+                <span>{activePlan.aggregate_metrics.staff_required} / {staffBudget}</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-400">Data Label:</span>
+                <span className="text-amber-400 font-mono text-[10px]">SYNTHETIC_MODELED_CROWD</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                setActiveProvenanceData(activePlan.provenance);
+                setShowProvenanceDrawer(true);
+              }}
+              className="mt-2 w-full py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+            >
+              View Full Provenance Audit Trail
+            </button>
+          </div>
+
           {/* Human Impact Index Panel */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -698,15 +827,36 @@ export default function EventFlowCommandCenter() {
           </div>
         </div>
 
-        {/* MIDDLE COLUMN: Interactive 3D Digital Twin & What-If */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
+        {/* RIGHT AREA: 3D Semantic Digital Twin (Spans the full 8-col blue marked area) */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-emerald-400" />
                 <h2 className="font-semibold text-sm text-white">3D Semantic Digital Twin</h2>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
+                {/* Fire Simulation Button */}
+                <button
+                  onClick={() => setIsFireActive((prev) => !prev)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded border transition-all flex items-center gap-1.5 shadow-sm ${
+                    isFireActive
+                      ? "bg-rose-950 text-rose-200 border-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.45)] animate-pulse"
+                      : "bg-red-950/60 text-red-300 border-red-800/80 hover:bg-red-900/80 hover:text-white hover:border-red-600"
+                  }`}
+                  title={
+                    isFireActive
+                      ? "Extinguish fire and return attendees inside Main Auditorium"
+                      : "Trigger fire emergency in Main Auditorium and simulate crowd evacuation"
+                  }
+                >
+                  <Flame className={`w-3.5 h-3.5 ${isFireActive ? "text-rose-400 animate-bounce" : "text-amber-400"}`} />
+                  {isFireActive ? "🧯 Extinguish / Reset Fire" : "🔥 Simulate Fire"}
+                </button>
+
+                <div className="h-4 w-px bg-slate-800" />
+
                 <button
                   onClick={() => {
                     if (blockedGate) handleToggleGateBlock(blockedGate);
@@ -745,7 +895,26 @@ export default function EventFlowCommandCenter() {
               isSimulating={isSimulating}
               planMetrics={activePlanMetrics}
               selectedPlanId={selectedPlanId}
+              isFireActive={isFireActive}
+              onToggleFire={() => setIsFireActive((prev) => !prev)}
             />
+
+            {isFireActive && (
+              <div className="flex items-center justify-between text-xs bg-rose-950/60 border border-rose-800/80 rounded-lg p-3 text-rose-200 animate-pulse">
+                <div className="flex items-center gap-2">
+                  <Flame className="w-4 h-4 text-rose-400 shrink-0" />
+                  <div>
+                    <strong className="text-white">Active Fire Outbreak Simulation:</strong> Fire ignited in <strong className="text-rose-300">Main Auditorium Hall</strong>. 3,000 modeled attendees are actively rushing out through exit doors toward safe assembly areas.
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFireActive(false)}
+                  className="px-2.5 py-1 rounded bg-rose-900 border border-rose-600 text-rose-100 text-[10px] font-bold hover:bg-rose-800 transition whitespace-nowrap ml-3"
+                >
+                  Extinguish Fire
+                </button>
+              </div>
+            )}
 
             <div className="text-xs bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-400">
               {blockedGate ? (
@@ -832,134 +1001,6 @@ export default function EventFlowCommandCenter() {
                 Click any step above to highlight the congestion point in the 3D Digital Twin. Road 17 exceeded design capacity, delaying ambulance transit beyond the 30s hard limit.
               </p>
             </div>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Core Candidate Plans Stack */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <h2 className="font-semibold text-sm text-white">Core Candidate Plans</h2>
-              </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                Score: Lower is Better
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              {plans.map((p) => {
-                const isSelected = p.plan_id === selectedPlanId;
-                const isPass = p.status === "PASS";
-
-                return (
-                  <div
-                    key={p.plan_id}
-                    onClick={() => setSelectedPlanId(p.plan_id)}
-                    className={`p-3.5 rounded-lg border transition cursor-pointer flex flex-col gap-2 ${isSelected
-                        ? "bg-slate-800/90 border-indigo-500 shadow-md shadow-indigo-500/10"
-                        : "bg-slate-950/70 border-slate-800 hover:border-slate-700"
-                      }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-xs text-slate-100">
-                        {p.name}
-                      </span>
-                      <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${isPass
-                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                            : "bg-rose-950 text-rose-300 border border-rose-800"
-                          }`}
-                      >
-                        {p.status}
-                      </span>
-                    </div>
-
-                    {isPass ? (
-                      <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-300">
-                        <div>
-                          <span className="text-slate-500 block text-[10px]">P95 Exit</span>
-                          <span className="font-mono font-bold text-slate-100">{p.aggregate_metrics.p95_exit_time_display}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[10px]">Step-Free</span>
-                          <span className="text-emerald-400 font-bold">PASS</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[10px]">Score</span>
-                          <span className="font-mono font-bold text-indigo-400">{p.final_score?.toFixed(3)}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-rose-400 bg-rose-950/30 p-2 rounded border border-rose-900/30">
-                        {p.rejection_reasons?.[0] || "Hard constraint failed"}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
-                      <span>Seeds: 42, 101, 777 (SUMO 1.21.0)</span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveProvenanceData(p.provenance);
-                          setShowProvenanceDrawer(true);
-                        }}
-                        className="text-indigo-400 hover:text-indigo-300 hover:underline"
-                      >
-                        Evidence &rarr;
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Selected Plan Evidence */}
-          <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-indigo-400" />
-                <h2 className="font-semibold text-sm text-white">Selected Plan Evidence</h2>
-              </div>
-              <span className="text-[11px] font-mono text-indigo-400">YugabyteDB Provenance</span>
-            </div>
-
-            <div className="text-xs space-y-2 text-slate-300">
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-400">Active Plan:</span>
-                <span className="font-mono font-semibold">{activePlan.name}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-400">Status:</span>
-                <span className={activePlan.status === "PASS" ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>
-                  {activePlan.status}
-                </span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-400">Deterministic Cost Score:</span>
-                <span className="font-mono font-bold text-indigo-400">{activePlan.final_score ?? "N/A (Failed Hard Checks)"}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-800">
-                <span className="text-slate-400">Marshals Required:</span>
-                <span>{activePlan.aggregate_metrics.staff_required} / {staffBudget}</span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-400">Data Label:</span>
-                <span className="text-amber-400 font-mono text-[10px]">SYNTHETIC_MODELED_CROWD</span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => {
-                setActiveProvenanceData(activePlan.provenance);
-                setShowProvenanceDrawer(true);
-              }}
-              className="mt-2 w-full py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
-            >
-              View Full Provenance Audit Trail
-            </button>
           </div>
         </div>
       </main>

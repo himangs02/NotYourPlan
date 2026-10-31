@@ -112,7 +112,7 @@ export const ANCHORS = {
 
   // ── EMERGENCY ──────────────────────────────────────────────────────────────
   AMBULANCE: {
-    position: new THREE.Vector3(26, 0, -16),
+    position: new THREE.Vector3(16, 1.95, -28),
     label: "Campus Medical Unit 1 — MEDIC-17",
     id: "ambulance_unit_1",
   },
@@ -162,10 +162,10 @@ export const CROWD_FLOW_STEPFREE = [
 
 /** Emergency responders: Road 17 corridor */
 export const ROAD_17_CORRIDOR = [
-  new THREE.Vector3(16, 0, -28),
-  new THREE.Vector3(16, 0, -16),
-  new THREE.Vector3(16, 0, -4),
-  new THREE.Vector3(0, 0, -11),  // Gate 1
+  new THREE.Vector3(16, 1.95, -28),
+  new THREE.Vector3(16, 1.95, -16),
+  new THREE.Vector3(16, 1.95, -4),
+  new THREE.Vector3(0, 1.95, -11),  // Gate 1
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

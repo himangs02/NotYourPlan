@@ -70,6 +70,7 @@ function createTextBadge(
 // ─────────────────────────────────────────────────────────────────────────────
 interface AgentState {
   pos: THREE.Vector3;
+  startDoor: THREE.Vector3;
   waypoints: THREE.Vector3[];
   waypointIdx: number;
   speed: number;
@@ -82,21 +83,70 @@ function randomBetween(a: number, b: number) {
 function spreadNear(wp: THREE.Vector3, spread = 3): THREE.Vector3 {
   return new THREE.Vector3(
     wp.x + randomBetween(-spread, spread),
-    0.8, // Elevated above city street level
+    1.95,
     wp.z + randomBetween(-spread, spread)
   );
 }
 
-function buildAgents(waypoints: THREE.Vector3[], count: number, spread = 3): AgentState[] {
+function buildHallAttendees(count: number, gate2Blocked: boolean): AgentState[] {
   const agents: AgentState[] = [];
   for (let i = 0; i < count; i++) {
+    let startDoor: THREE.Vector3;
+    let waypoints: THREE.Vector3[];
+
+    if (gate2Blocked) {
+      if (i % 2 === 0) {
+        startDoor = new THREE.Vector3(-12.0, 1.95, 4.0); // West street exit
+        waypoints = CROWD_FLOW_GATE2_BLOCKED_G4;
+      } else {
+        startDoor = new THREE.Vector3(12.0, 1.95, 4.0);  // East street exit
+        waypoints = CROWD_FLOW_GATE2_BLOCKED_G3;
+      }
+    } else {
+      // Main street exit onto Food Court Concourse / Plaza
+      startDoor = new THREE.Vector3(randomBetween(-2.8, 2.8), 1.95, 12.0);
+      waypoints = CROWD_FLOW_NORMAL;
+    }
+
+    // Populate attendees along the street evacuation stream
     const startIdx = Math.floor(Math.random() * (waypoints.length - 1));
-    const nearWp = spreadNear(waypoints[startIdx], spread);
+    const p1 = waypoints[startIdx];
+    const p2 = waypoints[startIdx + 1];
+    const alpha = Math.random();
+    const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
+    pos.x += randomBetween(-1.6, 1.6);
+    pos.y = 1.95;
+
     agents.push({
-      pos: nearWp,
+      pos,
+      startDoor: startDoor.clone(),
       waypoints,
       waypointIdx: startIdx + 1,
-      speed: randomBetween(0.04, 0.09),
+      speed: randomBetween(0.09, 0.15), // Visible, active emergency run speed
+    });
+  }
+  return agents;
+}
+
+function buildHallWheelchairs(count: number): AgentState[] {
+  const agents: AgentState[] = [];
+  const waypoints = CROWD_FLOW_STEPFREE;
+  for (let i = 0; i < count; i++) {
+    const startDoor = new THREE.Vector3(-12.0, 1.95, 4.0);
+    const startIdx = Math.floor(Math.random() * (waypoints.length - 1));
+    const p1 = waypoints[startIdx];
+    const p2 = waypoints[startIdx + 1];
+    const alpha = Math.random();
+    const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
+    pos.x += randomBetween(-0.8, 0.8);
+    pos.y = 1.95;
+
+    agents.push({
+      pos,
+      startDoor: startDoor.clone(),
+      waypoints,
+      waypointIdx: startIdx + 1,
+      speed: randomBetween(0.07, 0.11),
     });
   }
   return agents;
@@ -114,41 +164,244 @@ function ensureAgents(gate2Blocked: boolean) {
   _agentsBuilt = true;
   _agentsGate2Blocked = gate2Blocked;
 
-  if (gate2Blocked) {
-    _attendeeAgents = [
-      ...buildAgents(CROWD_FLOW_GATE2_BLOCKED_G3, 180, 4),
-      ...buildAgents(CROWD_FLOW_GATE2_BLOCKED_G4, 120, 4),
-    ];
-  } else {
-    _attendeeAgents = buildAgents(CROWD_FLOW_NORMAL, 300, 5);
-  }
-
-  _wheelAgents = buildAgents(CROWD_FLOW_STEPFREE, 40, 2);
+  _attendeeAgents = buildHallAttendees(300, gate2Blocked);
+  _wheelAgents = buildHallWheelchairs(40);
 
   // Staff stationed at gates and transit points
   _staffPositions = [
-    new THREE.Vector3(0, 0.8, -11),
-    new THREE.Vector3(2, 0.8, -11),
-    new THREE.Vector3(0, 0.8, 23),
-    new THREE.Vector3(2, 0.8, 23),
-    new THREE.Vector3(-2, 0.8, 23),
-    new THREE.Vector3(14, 0.8, 6),
-    new THREE.Vector3(14, 0.8, 8),
-    new THREE.Vector3(-14, 0.8, 6),
-    new THREE.Vector3(-14, 0.8, 8),
-    new THREE.Vector3(0, 0.8, 14),
-    new THREE.Vector3(0, 0.8, 16),
-    new THREE.Vector3(16, 0.8, -16),
-    new THREE.Vector3(16, 0.8, -14),
+    new THREE.Vector3(0, 1.95, -11),
+    new THREE.Vector3(2, 1.95, -11),
+    new THREE.Vector3(0, 1.95, 23),
+    new THREE.Vector3(2, 1.95, 23),
+    new THREE.Vector3(-2, 1.95, 23),
+    new THREE.Vector3(14, 1.95, 6),
+    new THREE.Vector3(14, 1.95, 8),
+    new THREE.Vector3(-14, 1.95, 6),
+    new THREE.Vector3(-14, 1.95, 8),
+    new THREE.Vector3(0, 1.95, 14),
+    new THREE.Vector3(0, 1.95, 16),
+    new THREE.Vector3(16, 1.95, -16),
+    new THREE.Vector3(16, 1.95, -14),
   ];
 
   _responderPositions = ROAD_17_CORRIDOR.map((wp) => spreadNear(wp, 1.5));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Humanoid & Wheelchair Geometry Builders for Realistic Crowd Simulation
+// ─────────────────────────────────────────────────────────────────────────────
+function mergeBufferGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const merged = new THREE.BufferGeometry();
+  let totalPositions = 0;
+  let totalNormals = 0;
+  let totalColors = 0;
+  let totalIndices = 0;
+
+  for (const g of geometries) {
+    const pos = g.getAttribute("position");
+    if (pos) totalPositions += pos.array.length;
+    const norm = g.getAttribute("normal");
+    if (norm) totalNormals += norm.array.length;
+    const col = g.getAttribute("color");
+    if (col) totalColors += col.array.length;
+    if (g.index) totalIndices += g.index.array.length;
+    else if (pos) totalIndices += pos.count;
+  }
+
+  const positions = new Float32Array(totalPositions);
+  const normals = totalNormals > 0 ? new Float32Array(totalNormals) : null;
+  const colors = totalColors > 0 ? new Float32Array(totalColors) : null;
+  const indices: number[] = [];
+
+  let posOffset = 0;
+  let normOffset = 0;
+  let colOffset = 0;
+  let vertexOffset = 0;
+
+  for (const g of geometries) {
+    const pos = g.getAttribute("position");
+    if (!pos) continue;
+    const posArr = pos.array as Float32Array;
+    positions.set(posArr, posOffset);
+    posOffset += posArr.length;
+
+    if (normals) {
+      const norm = g.getAttribute("normal");
+      if (norm) {
+        normals.set(norm.array as Float32Array, normOffset);
+        normOffset += norm.array.length;
+      }
+    }
+
+    if (colors) {
+      const col = g.getAttribute("color");
+      if (col) {
+        colors.set(col.array as Float32Array, colOffset);
+        colOffset += col.array.length;
+      } else {
+        for (let i = 0; i < pos.count * 3; i++) {
+          colors[colOffset++] = 1.0;
+        }
+      }
+    }
+
+    if (g.index) {
+      const idxArr = g.index.array;
+      for (let i = 0; i < idxArr.length; i++) {
+        indices.push(idxArr[i] + vertexOffset);
+      }
+    } else {
+      for (let i = 0; i < pos.count; i++) {
+        indices.push(i + vertexOffset);
+      }
+    }
+    vertexOffset += pos.count;
+  }
+
+  merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  if (normals) merged.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  if (colors) merged.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  merged.setIndex(indices);
+  return merged;
+}
+
+function addPart(
+  parts: THREE.BufferGeometry[],
+  geo: THREE.BufferGeometry,
+  r: number,
+  g: number,
+  b: number
+) {
+  const count = geo.attributes.position.count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  parts.push(geo);
+}
+
+const _humanoidCache = new Map<string, THREE.BufferGeometry>();
+function getHumanoidGeometry(r: number, g: number, b: number): THREE.BufferGeometry {
+  const key = `${r.toFixed(2)}_${g.toFixed(2)}_${b.toFixed(2)}`;
+  if (_humanoidCache.has(key)) return _humanoidCache.get(key)!;
+
+  const parts: THREE.BufferGeometry[] = [];
+
+  // 1. Hair / Headgear
+  const hair = new THREE.SphereGeometry(0.30, 8, 6);
+  hair.translate(0, 2.70, 0);
+  addPart(parts, hair, 0.15, 0.12, 0.10);
+
+  // 2. Head / Face (Warm Flesh Tone)
+  const head = new THREE.SphereGeometry(0.28, 8, 8);
+  head.translate(0, 2.45, 0);
+  addPart(parts, head, 0.96, 0.78, 0.65);
+
+  // 3. Torso / Jacket (Role Color)
+  const torso = new THREE.CylinderGeometry(0.42, 0.32, 1.0, 8);
+  torso.translate(0, 1.68, 0);
+  addPart(parts, torso, r, g, b);
+
+  // 4. Left Arm & Hand
+  const leftArm = new THREE.CylinderGeometry(0.11, 0.09, 0.90, 6);
+  leftArm.translate(-0.50, 1.62, -0.08);
+  addPart(parts, leftArm, r, g, b);
+
+  const leftHand = new THREE.SphereGeometry(0.09, 6, 6);
+  leftHand.translate(-0.50, 1.15, -0.08);
+  addPart(parts, leftHand, 0.96, 0.78, 0.65);
+
+  // 5. Right Arm & Hand
+  const rightArm = new THREE.CylinderGeometry(0.11, 0.09, 0.90, 6);
+  rightArm.translate(0.50, 1.62, 0.08);
+  addPart(parts, rightArm, r, g, b);
+
+  const rightHand = new THREE.SphereGeometry(0.09, 6, 6);
+  rightHand.translate(0.50, 1.15, 0.08);
+  addPart(parts, rightHand, 0.96, 0.78, 0.65);
+
+  // 6. Left Leg (Trousers - dark navy) in walking stride
+  const leftLeg = new THREE.CylinderGeometry(0.14, 0.11, 1.05, 6);
+  leftLeg.translate(-0.18, 0.58, 0.16);
+  addPart(parts, leftLeg, 0.14, 0.18, 0.26);
+
+  // 7. Right Leg (Trousers - dark navy) in walking stride
+  const rightLeg = new THREE.CylinderGeometry(0.14, 0.11, 1.05, 6);
+  rightLeg.translate(0.18, 0.58, -0.16);
+  addPart(parts, rightLeg, 0.14, 0.18, 0.26);
+
+  // 8. Shoes
+  const leftShoe = new THREE.BoxGeometry(0.16, 0.12, 0.28);
+  leftShoe.translate(-0.18, 0.06, 0.20);
+  addPart(parts, leftShoe, 0.08, 0.08, 0.09);
+
+  const rightShoe = new THREE.BoxGeometry(0.16, 0.12, 0.28);
+  rightShoe.translate(0.18, 0.06, -0.12);
+  addPart(parts, rightShoe, 0.08, 0.08, 0.09);
+
+  const merged = mergeBufferGeometries(parts);
+  merged.computeVertexNormals();
+  _humanoidCache.set(key, merged);
+  return merged;
+}
+
+const _wheelchairCache = new Map<string, THREE.BufferGeometry>();
+function getWheelchairGeometry(r: number, g: number, b: number): THREE.BufferGeometry {
+  const key = `${r.toFixed(2)}_${g.toFixed(2)}_${b.toFixed(2)}`;
+  if (_wheelchairCache.has(key)) return _wheelchairCache.get(key)!;
+
+  const parts: THREE.BufferGeometry[] = [];
+
+  // 1. Head / Face (Warm Flesh Tone)
+  const head = new THREE.SphereGeometry(0.26, 8, 8);
+  head.translate(0, 2.15, -0.10);
+  addPart(parts, head, 0.96, 0.78, 0.65);
+
+  // 2. Seated Torso (Role Color)
+  const torso = new THREE.CylinderGeometry(0.38, 0.30, 0.80, 8);
+  torso.translate(0, 1.50, -0.10);
+  addPart(parts, torso, r, g, b);
+
+  // 3. Lap / Thighs (Dark Trousers)
+  const lap = new THREE.BoxGeometry(0.44, 0.18, 0.55);
+  lap.translate(0, 1.02, 0.18);
+  addPart(parts, lap, 0.14, 0.18, 0.26);
+
+  // 4. Lower Legs
+  const legs = new THREE.BoxGeometry(0.38, 0.55, 0.18);
+  legs.translate(0, 0.55, 0.44);
+  addPart(parts, legs, 0.14, 0.18, 0.26);
+
+  // 5. Dual Big Wheel Rims (Metallic Chrome)
+  const leftWheelRim = new THREE.CylinderGeometry(0.55, 0.55, 0.08, 14);
+  leftWheelRim.rotateZ(Math.PI / 2);
+  leftWheelRim.translate(-0.42, 0.55, 0);
+  addPart(parts, leftWheelRim, 0.78, 0.82, 0.88);
+
+  const rightWheelRim = new THREE.CylinderGeometry(0.55, 0.55, 0.08, 14);
+  rightWheelRim.rotateZ(Math.PI / 2);
+  rightWheelRim.translate(0.42, 0.55, 0);
+  addPart(parts, rightWheelRim, 0.78, 0.82, 0.88);
+
+  // 6. Wheelchair Frame & Seat
+  const seat = new THREE.BoxGeometry(0.65, 0.08, 0.58);
+  seat.translate(0, 0.92, 0);
+  addPart(parts, seat, 0.18, 0.20, 0.24);
+
+  const backrest = new THREE.BoxGeometry(0.62, 0.65, 0.08);
+  backrest.translate(0, 1.40, -0.32);
+  addPart(parts, backrest, 0.18, 0.20, 0.24);
+
+  const merged = mergeBufferGeometries(parts);
+  merged.computeVertexNormals();
+  _wheelchairCache.set(key, merged);
+  return merged;
+}
+
 export class TwinAssetLibrary {
-  /**
-   * Builds the 3D representation for a semantic world object.
-   */
   public static createObjectMesh(obj: SemanticWorldObject, isSelected: boolean = false): THREE.Group {
     const group = new THREE.Group();
     group.name = obj.id;
@@ -567,33 +820,98 @@ export class TwinAssetLibrary {
     return g;
   }
 
-  private static createAmbulance(obj: SemanticWorldObject, isSelected: boolean): THREE.Group {
+    private static createAmbulance(obj: SemanticWorldObject, isSelected: boolean): THREE.Group {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.6, 2.2, 5.2),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 })
-    );
-    body.position.y = 1.4;
-    g.add(body);
 
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(2.65, 0.45, 5.0),
-      new THREE.MeshBasicMaterial({ color: 0xef4444 })
+    // 1. Patient Cabin (White gloss box)
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(2.6, 2.1, 4.4),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.25 })
     );
-    stripe.position.y = 1.4;
-    g.add(stripe);
+    cabin.position.set(0, 1.45, -0.6);
+    cabin.castShadow = true;
+    g.add(cabin);
 
-    const beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.3, 0.4, 8),
-      new THREE.MeshBasicMaterial({ color: isSelected ? 0xfbbf24 : 0x38bdf8 })
+    // 2. Driver Cab / Hood
+    const cab = new THREE.Mesh(
+      new THREE.BoxGeometry(2.45, 1.6, 2.0),
+      new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.25 })
     );
-    beacon.position.set(0, 2.6, 0.8);
-    g.add(beacon);
+    cab.position.set(0, 1.15, 1.8);
+    cab.castShadow = true;
+    g.add(cab);
 
-    const badge = createTextBadge("🚑 MEDIC-17", "rgba(15, 23, 42, 0.85)", "#ef4444", "#fee2e2");
-    badge.position.set(0, 4.0, 0);
+    // 3. Dark Tinted Windshield & Windows
+    const windshield = new THREE.Mesh(
+      new THREE.BoxGeometry(2.48, 0.9, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.8 })
+    );
+    windshield.position.set(0, 1.55, 1.6);
+    g.add(windshield);
+
+    // 4. Red Emergency Side Stripes
+    const stripeL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.45, 5.8),
+      new THREE.MeshBasicMaterial({ color: 0xdc2626 })
+    );
+    stripeL.position.set(-1.31, 1.35, 0.4);
+    const stripeR = stripeL.clone();
+    stripeR.position.x = 1.31;
+    g.add(stripeL, stripeR);
+
+    // 5. Red Medical Crosses on Sides
+    const crossVL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.85, 0.26), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+    crossVL.position.set(-1.32, 1.6, -0.6);
+    const crossHL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.26, 0.85), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+    crossHL.position.set(-1.32, 1.6, -0.6);
+    g.add(crossVL, crossHL);
+
+    const crossVR = crossVL.clone(); crossVR.position.x = 1.32;
+    const crossHR = crossHL.clone(); crossHR.position.x = 1.32;
+    g.add(crossVR, crossHR);
+
+    // 6. 4 Wheels (Rubber Tires with silver rims)
+    const wheelGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.32, 14);
+    wheelGeo.rotateZ(Math.PI / 2);
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.7 });
+
+    const wFL = new THREE.Mesh(wheelGeo, tireMat); wFL.position.set(-1.28, 0.48, 1.8);
+    const wFR = new THREE.Mesh(wheelGeo, tireMat); wFR.position.set(1.28, 0.48, 1.8);
+    const wRL = new THREE.Mesh(wheelGeo, tireMat); wRL.position.set(-1.28, 0.48, -1.5);
+    const wRR = new THREE.Mesh(wheelGeo, tireMat); wRR.position.set(1.28, 0.48, -1.5);
+    g.add(wFL, wFR, wRL, wRR);
+
+    // 7. Headlights (Bright White)
+    const hlL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.08), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    hlL.position.set(-0.85, 0.95, 2.82);
+    const hlR = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.08), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    hlR.position.set(0.85, 0.95, 2.82);
+    g.add(hlL, hlR);
+
+    // 8. Emergency Lightbar Sirens on Roof (Flashing Red & Blue)
+    const sirenRed = new THREE.Mesh(
+      new THREE.BoxGeometry(0.45, 0.30, 0.35),
+      new THREE.MeshBasicMaterial({ color: 0xff0000 })
+    );
+    sirenRed.name = "siren_red";
+    sirenRed.position.set(-0.52, 2.65, 1.4);
+    g.add(sirenRed);
+
+    const sirenBlue = new THREE.Mesh(
+      new THREE.BoxGeometry(0.45, 0.30, 0.35),
+      new THREE.MeshBasicMaterial({ color: 0x0066ff })
+    );
+    sirenBlue.name = "siren_blue";
+    sirenBlue.position.set(0.52, 2.65, 1.4);
+    g.add(sirenBlue);
+
+    // 9. Floating 3D Badge Pin
+    const badge = createTextBadge("🚑 MEDIC-17 (ACTIVE)", "rgba(15, 23, 42, 0.90)", "#ef4444", "#fee2e2");
+    badge.position.set(0, 4.5, 0);
     g.add(badge);
 
+    // g position is managed by the parent group at obj.position
+    g.position.set(0, 0, 0);
     return g;
   }
 
@@ -627,76 +945,68 @@ export class TwinAssetLibrary {
     const group = new THREE.Group();
     group.name = "crowd_instanced_layer";
 
-    // Agents sized prominently (radius 0.55, height 2.0) elevated at y = 0.8
-    const agentGeo = new THREE.CylinderGeometry(0.55, 0.55, 2.0, 8);
-    agentGeo.translate(0, 1.0, 0);
+    // Realistic Humanoid & Wheelchair 3D Geometries with multi-tone vertex colors
+    const attendeeGeo = getHumanoidGeometry(0.22, 0.74, 0.97); // Sky Blue (#38bdf8)
+    const wheelGeo = getWheelchairGeometry(0.75, 0.52, 0.99);   // Purple (#c084fc)
+    const staffGeo = getHumanoidGeometry(0.98, 0.80, 0.08);   // Safety Yellow (#facc15)
+    const responderGeo = getHumanoidGeometry(0.29, 0.87, 0.50); // Medic Green (#4ade80)
+
+    const crowdMaterial = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.35,
+      metalness: 0.12,
+    });
 
     const attendeeCount = _attendeeAgents.length;
     const wheelCount = _wheelAgents.length;
     const staffCount = _staffPositions.length;
     const responderCount = _responderPositions.length;
 
-    // 1. General Attendees: Vibrant Sky Blue
-    const attendeeMesh = new THREE.InstancedMesh(
-      agentGeo,
-      new THREE.MeshBasicMaterial({ color: 0x38bdf8 }),
-      attendeeCount
-    );
+    const attendeeMesh = new THREE.InstancedMesh(attendeeGeo, crowdMaterial, attendeeCount);
     attendeeMesh.name = "crowd_attendees";
 
-    // 2. Mobility-Impaired / Wheelchair: Vibrant Purple
-    const wheelMesh = new THREE.InstancedMesh(
-      agentGeo,
-      new THREE.MeshBasicMaterial({ color: 0xc084fc }),
-      wheelCount
-    );
+    const wheelMesh = new THREE.InstancedMesh(wheelGeo, crowdMaterial, wheelCount);
     wheelMesh.name = "crowd_wheelchair";
 
-    // 3. Marshals: Safety Yellow
-    const staffMesh = new THREE.InstancedMesh(
-      agentGeo,
-      new THREE.MeshBasicMaterial({ color: 0xfacc15 }),
-      staffCount
-    );
+    const staffMesh = new THREE.InstancedMesh(staffGeo, crowdMaterial, staffCount);
     staffMesh.name = "crowd_staff";
 
-    // 4. Emergency Responders: Vibrant Green
-    const responderMesh = new THREE.InstancedMesh(
-      agentGeo,
-      new THREE.MeshBasicMaterial({ color: 0x4ade80 }),
-      responderCount
-    );
+    const responderMesh = new THREE.InstancedMesh(responderGeo, crowdMaterial, responderCount);
     responderMesh.name = "crowd_responders";
 
     const dummy = new THREE.Object3D();
 
     _attendeeAgents.forEach((a, i) => {
-      dummy.position.set(a.pos.x, 0.8, a.pos.z);
-      dummy.scale.setScalar(1);
+      // HIDDEN PRE-FIRE: People are completely inside the building and not visible on rooftops/outside!
+      dummy.position.set(0, -999, 0);
+      dummy.scale.set(0, 0, 0);
       dummy.updateMatrix();
       attendeeMesh.setMatrixAt(i, dummy.matrix);
     });
     attendeeMesh.instanceMatrix.needsUpdate = true;
 
     _wheelAgents.forEach((a, i) => {
-      dummy.position.set(a.pos.x, 0.8, a.pos.z);
-      dummy.scale.set(1.3, 0.75, 1.3);
+      // HIDDEN PRE-FIRE
+      dummy.position.set(0, -999, 0);
+      dummy.scale.set(0, 0, 0);
       dummy.updateMatrix();
       wheelMesh.setMatrixAt(i, dummy.matrix);
     });
     wheelMesh.instanceMatrix.needsUpdate = true;
 
     _staffPositions.forEach((p, i) => {
-      dummy.position.set(p.x, 0.8, p.z);
-      dummy.scale.set(1.15, 1.15, 1.15);
+      dummy.position.set(p.x, 1.95, p.z);
+      dummy.scale.setScalar(1.30);
+      dummy.rotation.set(0, 0, 0);
       dummy.updateMatrix();
       staffMesh.setMatrixAt(i, dummy.matrix);
     });
     staffMesh.instanceMatrix.needsUpdate = true;
 
     _responderPositions.forEach((p, i) => {
-      dummy.position.set(p.x, 0.8, p.z);
-      dummy.scale.set(1.15, 1.15, 1.15);
+      dummy.position.set(p.x, 1.95, p.z);
+      dummy.scale.setScalar(1.30);
+      dummy.rotation.set(0, 0, 0);
       dummy.updateMatrix();
       responderMesh.setMatrixAt(i, dummy.matrix);
     });
@@ -707,6 +1017,163 @@ export class TwinAssetLibrary {
     return { group, attendeeMesh, wheelMesh, staffMesh, responderMesh };
   }
 
+        private static _isFireActive = false;
+
+  public static setFireState(isFireActive: boolean, gate2Blocked: boolean = false): void {
+    this._isFireActive = isFireActive;
+  }
+
+  public static isFireActive(): boolean {
+    return this._isFireActive;
+  }
+
+  /**
+   * Compact 1/4th scale rooftop fire effect on the Main Auditorium.
+   * Contained directly on the building roof (y = 13.0 to 15.5m), realistic and clear.
+   */
+  public static createFireEffect(pos: THREE.Vector3): THREE.Group {
+    const group = new THREE.Group();
+    group.name = "fire_simulation_system";
+    group.position.set(pos.x, 0, pos.z);
+
+    // 1. Warm Flickering Fire PointLight (compact 4.5 intensity)
+    const fireLight = new THREE.PointLight(0xff4500, 4.5, 32, 1.4);
+    fireLight.position.set(0, 14.2, 0);
+    fireLight.name = "fire_light";
+    group.add(fireLight);
+
+    // 2. Compact 1/4th Scale Rooftop Flame Cones
+    const flameCount = 38;
+    const flameGeo = new THREE.ConeGeometry(0.55, 1.9, 5);
+    const flameMat = new THREE.MeshBasicMaterial({
+      color: 0xff4500,
+      transparent: true,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const flameMesh = new THREE.InstancedMesh(flameGeo, flameMat, flameCount);
+    flameMesh.name = "flame_mesh";
+    flameMesh.renderOrder = 999;
+
+    const flameData: { x: number; y: number; z: number; vy: number; baseScale: number; phase: number }[] = [];
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i < flameCount; i++) {
+      const fd = {
+        x: randomBetween(-5.0, 3.0),
+        y: randomBetween(13.0, 14.6),
+        z: randomBetween(-3.0, 2.0),
+        vy: randomBetween(1.8, 3.8),
+        baseScale: randomBetween(0.7, 1.2),
+        phase: Math.random() * Math.PI * 2,
+      };
+      flameData.push(fd);
+      dummy.position.set(fd.x, fd.y, fd.z);
+      dummy.scale.setScalar(fd.baseScale);
+      dummy.updateMatrix();
+      flameMesh.setMatrixAt(i, dummy.matrix);
+    }
+    flameMesh.instanceMatrix.needsUpdate = true;
+    (flameMesh as any).userData = { flameData };
+    group.add(flameMesh);
+
+    // 3. Compact Smoke Puffs
+    const smokeCount = 18;
+    const smokeGeo = new THREE.DodecahedronGeometry(1.0, 1);
+    const smokeMat = new THREE.MeshBasicMaterial({
+      color: 0x1e293b,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+    });
+    const smokeMesh = new THREE.InstancedMesh(smokeGeo, smokeMat, smokeCount);
+    smokeMesh.name = "smoke_mesh";
+    smokeMesh.renderOrder = 998;
+
+    const smokeData: { x: number; y: number; z: number; vy: number; scale: number; maxScale: number }[] = [];
+    for (let i = 0; i < smokeCount; i++) {
+      const sd = {
+        x: randomBetween(-4.5, 2.5),
+        y: randomBetween(14.0, 16.5),
+        z: randomBetween(-2.5, 1.5),
+        vy: randomBetween(1.2, 2.5),
+        scale: randomBetween(0.8, 1.4),
+        maxScale: randomBetween(2.0, 3.2),
+      };
+      smokeData.push(sd);
+      dummy.position.set(sd.x, sd.y, sd.z);
+      dummy.scale.setScalar(sd.scale);
+      dummy.updateMatrix();
+      smokeMesh.setMatrixAt(i, dummy.matrix);
+    }
+    smokeMesh.instanceMatrix.needsUpdate = true;
+    (smokeMesh as any).userData = { smokeData };
+    group.add(smokeMesh);
+
+    // 4. Rooftop Emergency 3D Badge Pin (sitting neatly above the roof at y = 16.5)
+    const badge = createTextBadge("🔥 AUDITORIUM FIRE • EVACUATION", "rgba(185, 28, 28, 0.95)", "#ffffff", "#fee2e2");
+    badge.position.set(-1, 16.5, 0);
+    badge.name = "fire_badge";
+    group.add(badge);
+
+    return group;
+  }
+
+  public static updateFireEffect(dt: number, fireGroup: THREE.Group): void {
+    const dtSec = Math.min(dt / 1000, 0.05);
+    const now = performance.now();
+
+    // 1. Flicker Fire Light
+    const fireLight = fireGroup.getObjectByName("fire_light") as THREE.PointLight;
+    if (fireLight) {
+      fireLight.intensity = 4.2 + Math.sin(now * 0.02) * 1.5 + (Math.random() - 0.5) * 1.0;
+    }
+
+    const dummy = new THREE.Object3D();
+
+    // 2. Animate Rooftop Flames
+    const flameMesh = fireGroup.getObjectByName("flame_mesh") as THREE.InstancedMesh;
+    if (flameMesh && (flameMesh as any).userData?.flameData) {
+      const flameData = (flameMesh as any).userData.flameData as any[];
+      flameData.forEach((fd, i) => {
+        fd.y += fd.vy * dtSec;
+        if (fd.y > 15.6) {
+          fd.y = randomBetween(13.0, 13.8);
+          fd.x = randomBetween(-5.0, 3.0);
+          fd.z = randomBetween(-3.0, 2.0);
+        }
+        const flick = Math.sin(now * 0.02 + fd.phase) * 0.25;
+        dummy.position.set(fd.x + flick * 0.2, fd.y, fd.z);
+        dummy.scale.set(fd.baseScale * (1 + flick), fd.baseScale * (1.1 + flick), fd.baseScale * (1 + flick));
+        dummy.updateMatrix();
+        flameMesh.setMatrixAt(i, dummy.matrix);
+      });
+      flameMesh.instanceMatrix.needsUpdate = true;
+    }
+
+    // 3. Animate Smoke
+    const smokeMesh = fireGroup.getObjectByName("smoke_mesh") as THREE.InstancedMesh;
+    if (smokeMesh && (smokeMesh as any).userData?.smokeData) {
+      const smokeData = (smokeMesh as any).userData.smokeData as any[];
+      smokeData.forEach((sd, i) => {
+        sd.y += sd.vy * dtSec;
+        sd.z += 0.5 * dtSec;
+        if (sd.y > 18.5) {
+          sd.y = randomBetween(14.0, 15.0);
+          sd.x = randomBetween(-4.5, 2.5);
+          sd.z = randomBetween(-2.5, 1.5);
+        }
+        const growth = Math.min(sd.maxScale, sd.scale + (sd.y - 14.0) * 0.2);
+        dummy.position.set(sd.x, sd.y, sd.z);
+        dummy.scale.setScalar(growth);
+        dummy.updateMatrix();
+        smokeMesh.setMatrixAt(i, dummy.matrix);
+      });
+      smokeMesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
   public static updateCrowdAnimation(
     dt: number,
     attendeeMesh: THREE.InstancedMesh,
@@ -715,45 +1182,141 @@ export class TwinAssetLibrary {
     const dummy = new THREE.Object3D();
     const dtSec = Math.min(dt / 1000, 0.05);
 
+    if (!this._isFireActive) {
+      // PRE-FIRE STATE: People are completely HIDDEN inside the building!
+      // Streets and rooftops are completely clean.
+      _attendeeAgents.forEach((a, i) => {
+        dummy.position.set(0, -999, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        attendeeMesh.setMatrixAt(i, dummy.matrix);
+      });
+      attendeeMesh.instanceMatrix.needsUpdate = true;
+
+      _wheelAgents.forEach((a, i) => {
+        dummy.position.set(0, -999, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        wheelMesh.setMatrixAt(i, dummy.matrix);
+      });
+      wheelMesh.instanceMatrix.needsUpdate = true;
+      return;
+    }
+
+    // FIRE ACTIVE: Attendees are FULLY VISIBLE and running out on the road towards safety!
     _attendeeAgents.forEach((a, i) => {
-      if (a.waypointIdx >= a.waypoints.length) a.waypointIdx = 0;
       const target = a.waypoints[a.waypointIdx];
       const dx = target.x - a.pos.x;
       const dz = target.z - a.pos.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
       const step = a.speed * dtSec * 60;
-      if (dist < step + 0.1) {
+
+      if (dist < step + 0.3) {
         a.waypointIdx++;
+        if (a.waypointIdx >= a.waypoints.length) {
+          // Wrap back to street exit to maintain a continuous, vibrant evacuation stream
+          a.waypointIdx = 0;
+          a.pos.set(a.startDoor.x + randomBetween(-1.5, 1.5), 1.95, a.startDoor.z);
+        }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
-      dummy.position.set(a.pos.x, 0.8, a.pos.z);
-      dummy.scale.setScalar(1);
+
+      dummy.position.set(a.pos.x, 1.95, a.pos.z);
+      dummy.scale.setScalar(1.25);
+      if (dist > 0.01) {
+        dummy.rotation.set(0, Math.atan2(dx, dz), 0);
+      }
       dummy.updateMatrix();
       attendeeMesh.setMatrixAt(i, dummy.matrix);
     });
     attendeeMesh.instanceMatrix.needsUpdate = true;
 
+    // Wheelchair users actively evacuating along Step-Free Ramp route
     _wheelAgents.forEach((a, i) => {
-      if (a.waypointIdx >= a.waypoints.length) a.waypointIdx = 0;
       const target = a.waypoints[a.waypointIdx];
       const dx = target.x - a.pos.x;
       const dz = target.z - a.pos.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      const step = a.speed * dtSec * 60 * 0.65;
-      if (dist < step + 0.1) {
+      const step = a.speed * dtSec * 60;
+
+      if (dist < step + 0.3) {
         a.waypointIdx++;
+        if (a.waypointIdx >= a.waypoints.length) {
+          a.waypointIdx = 0;
+          a.pos.set(a.startDoor.x + randomBetween(-0.8, 0.8), 1.95, a.startDoor.z);
+        }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
-      dummy.position.set(a.pos.x, 0.8, a.pos.z);
-      dummy.scale.set(1.3, 0.75, 1.3);
+
+      dummy.position.set(a.pos.x, 1.95, a.pos.z);
+      dummy.scale.setScalar(1.25);
+      if (dist > 0.01) {
+        dummy.rotation.set(0, Math.atan2(dx, dz), 0);
+      }
       dummy.updateMatrix();
       wheelMesh.setMatrixAt(i, dummy.matrix);
     });
     wheelMesh.instanceMatrix.needsUpdate = true;
+  }
+
+
+  private static _ambWpIdx = 0;
+  private static _ambDir = 1;
+  private static _ambTimer = 0;
+
+  /**
+   * Drives the emergency ambulance dynamically along the Road 17 Medical Corridor.
+   */
+  public static updateAmbulanceAnimation(dt: number, ambGroup: THREE.Object3D): void {
+    const dtSec = Math.min(dt / 1000, 0.05);
+    const speed = 8.5; // Fast emergency transit speed (m/s)
+
+    const waypoints = ROAD_17_CORRIDOR;
+    if (!waypoints || waypoints.length === 0) return;
+
+    const currentPos = ambGroup.position;
+    const targetWp = waypoints[this._ambWpIdx];
+
+    const dx = targetWp.x - currentPos.x;
+    const dz = targetWp.z - currentPos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    const step = speed * dtSec;
+    if (dist < step + 0.25) {
+      this._ambWpIdx += this._ambDir;
+      if (this._ambWpIdx >= waypoints.length) {
+        this._ambWpIdx = waypoints.length - 2;
+        this._ambDir = -1; // Reverse back toward medical post
+      } else if (this._ambWpIdx < 0) {
+        this._ambWpIdx = 1;
+        this._ambDir = 1; // Drive toward Gate 1 again
+      }
+    } else {
+      currentPos.x += (dx / dist) * step;
+      currentPos.z += (dz / dist) * step;
+      // Rotate vehicle heading directly forward
+      ambGroup.rotation.y = Math.atan2(dx, dz);
+    }
+
+    // Gentle vehicle suspension vibration
+    ambGroup.position.y = 1.95 + Math.sin(performance.now() * 0.015) * 0.02;
+
+    // Siren strobe flashing (alternating high-intensity red & blue pulses)
+    this._ambTimer += dtSec * 12;
+    const sirenRed = ambGroup.getObjectByName("siren_red") as THREE.Mesh;
+    const sirenBlue = ambGroup.getObjectByName("siren_blue") as THREE.Mesh;
+    const isRedFlash = Math.sin(this._ambTimer * 3.5) > 0;
+
+    if (sirenRed) {
+      (sirenRed.material as THREE.MeshBasicMaterial).color.setHex(isRedFlash ? 0xff1111 : 0x440000);
+    }
+    if (sirenBlue) {
+      (sirenBlue.material as THREE.MeshBasicMaterial).color.setHex(!isRedFlash ? 0x00aaff : 0x001155);
+    }
   }
 
   public static resetAgents(): void {
