@@ -213,8 +213,8 @@ class CreateEventRequest(BaseModel):
     staff_budget: int = 20
 
 class CompileGoalRequest(BaseModel):
-    event_id: str
-    world_version_id: str
+    event_id: str = "event-dtu-convocation-001"
+    world_version_id: Optional[str] = "world-v1-original"
     raw_text: str
 
 class WhatIfRequest(BaseModel):

@@ -1,3 +1,5 @@
+
+
 "use client";
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
@@ -6,7 +8,9 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import {
   RotateCcw, Layers, AlertTriangle, Plus, MapPin, X, Loader2,
-  Activity, Shield, Eye, Zap, Flame, Siren, Navigation
+  Activity, Shield, Eye, Zap, Flame, Siren, Navigation, Maximize2,
+  Building2, Coffee, Car, ShieldCheck, DoorOpen, Accessibility,
+  CheckCircle2, XCircle, Sliders, LocateFixed
 } from "lucide-react";
 import { SemanticWorldObject, CameraViewMode, SimViewMode, PlanMetrics3D } from "./types";
 import {
@@ -56,6 +60,31 @@ export interface HoveredBlockInfo {
   obj?: SemanticWorldObject;
 }
 
+function renderBlockIcon(iconKey: string) {
+  switch (iconKey) {
+    case "auditorium":
+      return <Building2 className="w-4 h-4 text-purple-600" />;
+    case "food_court":
+      return <Coffee className="w-4 h-4 text-amber-600" />;
+    case "parking":
+      return <Car className="w-4 h-4 text-slate-600" />;
+    case "assembly_area":
+      return <ShieldCheck className="w-4 h-4 text-emerald-600" />;
+    case "gate":
+      return <DoorOpen className="w-4 h-4 text-indigo-600" />;
+    case "emergency_route":
+      return <Navigation className="w-4 h-4 text-rose-600" />;
+    case "accessible_route":
+      return <Accessibility className="w-4 h-4 text-cyan-600" />;
+    case "ambulance":
+      return <Siren className="w-4 h-4 text-rose-600" />;
+    case "fire_extinguisher":
+      return <Flame className="w-4 h-4 text-amber-600" />;
+    default:
+      return <Layers className="w-4 h-4 text-purple-600" />;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 interface VenueTwinViewerProps {
   occupancyAssessment?: OccupancyAssessment | null;
@@ -74,6 +103,7 @@ interface VenueTwinViewerProps {
   ambRerouted?: boolean;
   selectedResourceId?: string | null;
   onEmergencyStatusChange?: (resourceId: string, status: string, etaSeconds: number) => void;
+  onAmbulanceEtaChange?: (remainingSec: number, remainingDistMeters: number, status: string) => void;
   isEvacuating?: boolean;
   onToggleEvacuation?: () => void;
   onDeployExtinguisher?: () => void;
@@ -97,6 +127,7 @@ export default function VenueTwinViewer({
   ambRerouted = false,
   selectedResourceId = null,
   onEmergencyStatusChange,
+  onAmbulanceEtaChange,
   isEvacuating: externalIsEvacuating = false,
   onToggleEvacuation,
   onDeployExtinguisher,
@@ -123,6 +154,13 @@ export default function VenueTwinViewer({
   const feRouteGroupRef = useRef<THREE.Group | null>(null);
   const ambControllerRef = useRef<EmergencyVehicleController | null>(null);
   const feControllerRef = useRef<EmergencyVehicleController | null>(null);
+
+  // Live real-time ambulance ETA to destination HUD
+  const [liveAmbEta, setLiveAmbEta] = useState<{
+    status: string;
+    remainingSec: number;
+    remainingDist: number;
+  } | null>(null);
 
   // Ambulance tire tracemarks, extinguisher spray & building hover outline
   const tireTracksRef = useRef<AmbulanceTireTracemarks | null>(null);
@@ -298,8 +336,8 @@ export default function VenueTwinViewer({
         is_emergency_corridor: true,
         rejection_reason: isFireActive
           ? (ambRerouted
-              ? "Emergency corridor obstruction on Road 17. Ambulance rerouted via East Arcade bypass."
-              : "Shortest route blocked by fire hazard. Ambulance redirected through protected emergency corridor.")
+            ? "Emergency corridor obstruction on Road 17. Ambulance rerouted via East Arcade bypass."
+            : "Shortest route blocked by fire hazard. Ambulance redirected through protected emergency corridor.")
           : undefined,
       },
     },
@@ -360,7 +398,7 @@ export default function VenueTwinViewer({
   );
 
   const getBlockInfoFromSemantic = useCallback((obj: SemanticWorldObject, x: number, y: number): HoveredBlockInfo => {
-    let icon = "🏢";
+    let icon = "building";
     let blockCode = "Block";
     let description = "EventFlow campus zone";
     let statusText = "OPERATIONAL";
@@ -368,65 +406,65 @@ export default function VenueTwinViewer({
     let cameraPreset: CameraViewMode | undefined = undefined;
 
     if (obj.type === "auditorium") {
-      icon = "🏛️";
+      icon = "auditorium";
       blockCode = "Block A · Auditorium Sector";
       description = "Primary venue gathering arena. Capacity: 1,800 occupants. Direct link to Road 17 and West Ramp.";
       cameraPreset = "FOCUS_AUDITORIUM";
       if (isFireActive) {
-        statusText = "🔥 ACTIVE FIRE HAZARD";
+        statusText = "ACTIVE FIRE HAZARD";
         statusColor = "bg-rose-950 text-rose-300 border-rose-700 animate-pulse";
       } else if (isEvacuating) {
-        statusText = "🏃 EVACUATION ACTIVE";
+        statusText = "EVACUATION ACTIVE";
         statusColor = "bg-amber-950 text-amber-300 border-amber-700";
       }
     } else if (obj.type === "food_court") {
-      icon = "🍽️";
+      icon = "food_court";
       blockCode = "Block B · Concourse Dining";
       description = "Concourse dining and hospitality pavilion connecting directly to Gate 2 Main South Plaza.";
       if (isEvacuating) {
-        statusText = "🏃 EVACUATING CROWD";
+        statusText = "EVACUATING CROWD";
         statusColor = "bg-amber-950 text-amber-300 border-amber-700";
       }
     } else if (obj.type === "parking") {
-      icon = "🅿️";
+      icon = "parking";
       blockCode = "Block C · North Parking Logistics";
       description = "Vehicle parking plaza and bypass transit corridor for emergency responders.";
     } else if (obj.type === "assembly_area") {
-      icon = "🛡️";
+      icon = "assembly_area";
       blockCode = "Sector Safe · Assembly Plaza";
       description = "Designated central evacuation zone. 3,500 capacity, 150m safe buffer distance.";
       cameraPreset = "FOCUS_ASSEMBLY";
       statusText = "SAFE ASSEMBLED ZONE";
       statusColor = "bg-emerald-950 text-emerald-300 border-emerald-700";
     } else if (obj.type === "gate") {
-      icon = "🚪";
+      icon = "gate";
       blockCode = `Gate Sector · ${obj.id.toUpperCase()}`;
       description = `Access threshold with ${obj.properties.width_m ?? 6}m egress width and ${obj.properties.flow_capacity_ped_per_sec ?? 8} ped/sec flow capacity.`;
       cameraPreset = obj.id === "gate_2" ? "FOCUS_GATE2" : undefined;
       const isBlocked = obj.properties.is_blocked || obj.properties.status === "BLOCKED";
-      statusText = isBlocked ? "⛔ BLOCKED" : "🟢 OPEN";
+      statusText = isBlocked ? "BLOCKED" : "OPEN";
       statusColor = isBlocked ? "bg-rose-950 text-rose-300 border-rose-700" : "bg-emerald-950 text-emerald-300 border-emerald-700";
     } else if (obj.type === "emergency_route" || obj.id === "road_17") {
-      icon = "🛣️";
+      icon = "emergency_route";
       blockCode = "Corridor R-17 · Medical Express";
       description = "Protected emergency vehicle corridor with priority right-of-way for MEDIC-17 on the paved road.";
       cameraPreset = "FOCUS_ROAD17";
-      statusText = road17Congested ? "⚠️ CONGESTED" : "CLEAR";
+      statusText = road17Congested ? "CONGESTED" : "CLEAR";
       statusColor = road17Congested ? "bg-rose-950 text-rose-300 border-rose-700" : "bg-cyan-950 text-cyan-300 border-cyan-700";
     } else if (obj.type === "accessible_route" || obj.id === "ramp_stepfree") {
-      icon = "♿";
+      icon = "accessible_route";
       blockCode = "Ramp W-01 · Step-Free Access";
       description = "Universal accessibility ramp (4.5% gradient) directly connecting Auditorium to Gate 4.";
       statusText = "ACCESSIBLE PASS";
       statusColor = "bg-cyan-950 text-cyan-300 border-cyan-700";
     } else if (obj.type === "ambulance" || obj.id === "AMB-001") {
-      icon = "🚑";
+      icon = "ambulance";
       blockCode = "Emergency Unit · MEDIC-17";
       description = "BLS Ambulance deployed for rapid emergency response. Drives strictly along paved Road 17.";
       statusText = ambControllerRef.current?.status ?? (isFireActive ? "EN_ROUTE" : "STANDBY");
       statusColor = statusText === "STANDBY" ? "bg-slate-800 text-cyan-300 border-slate-700" : "bg-rose-950 text-rose-300 border-rose-700 animate-pulse";
     } else if (obj.type === "fire_extinguisher" || obj.id.startsWith("FE-")) {
-      icon = "🧯";
+      icon = "fire_extinguisher";
       blockCode = `Station ${obj.id} · Rapid Suppression`;
       description = `Class ABC chemical fire suppression station stationed in ${obj.properties.building ?? "Building B"}.`;
       statusText = obj.properties.status ?? "AVAILABLE";
@@ -463,8 +501,8 @@ export default function VenueTwinViewer({
       const match = allWorldObjects.find((o) => o.id === "food_court");
       if (match) return getBlockInfoFromSemantic(match, x, y);
     }
-    // North-South Road 17 Emergency Medical Corridor (x: 14 to 19, z: -32 to 12)
-    if (pt.x >= 14 && pt.x <= 19 && pt.z >= -32 && pt.z <= 12) {
+    // North-South Road 17 Emergency Medical Corridor (x: 7.6 to 11.4, z: -34 to 12)
+    if (pt.x >= 7.6 && pt.x <= 11.4 && pt.z >= -34 && pt.z <= 12) {
       const match = allWorldObjects.find((o) => o.id === "road_17");
       if (match) return getBlockInfoFromSemantic(match, x, y);
     }
@@ -488,17 +526,17 @@ export default function VenueTwinViewer({
     let name = "Campus Commercial Sector";
     let blockCode = "Block E · Commercial Arcade";
     let desc = "Auxiliary campus commercial facilities and services.";
-    let icon = "🏢";
+    let icon = "building";
     if (pt.x < -12) {
       name = "West Academic Wing";
       blockCode = "Block W · Academic Complex";
       desc = "Multilevel academic department complex with step-free concourse access.";
-      icon = "🏫";
+      icon = "building";
     } else if (pt.z < -14) {
       name = "North Logistics Plaza";
       blockCode = "Block N · Logistics Annex";
       desc = "Service infrastructure and vehicle maintenance staging.";
-      icon = "🏭";
+      icon = "parking";
     }
 
     return {
@@ -570,9 +608,9 @@ export default function VenueTwinViewer({
 
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.background = new THREE.Color(0x030712);
+    scene.background = new THREE.Color(0xdbeafe);
 
-    const grid = new THREE.GridHelper(150, 75, 0x1e293b, 0x0f172a);
+    const grid = new THREE.GridHelper(150, 75, 0x94a3b8, 0xcbd5e1);
     grid.position.y = -0.02;
     scene.add(grid);
 
@@ -600,12 +638,12 @@ export default function VenueTwinViewer({
     objectsGroupRef.current = objectsGroup;
 
     // Lighting
-    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.25));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.4);
     dir.position.set(30, 60, 40);
     dir.castShadow = true;
     scene.add(dir);
-    const accent = new THREE.PointLight(0x6366f1, 2, 80);
+    const accent = new THREE.PointLight(0xdbeafe, 1.5, 80);
     accent.position.set(-20, 25, -20);
     scene.add(accent);
 
@@ -966,7 +1004,7 @@ export default function VenueTwinViewer({
       });
       renderer.dispose();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Sync semantic objects with 3D scene ───────────────────────────────────
@@ -1027,8 +1065,10 @@ export default function VenueTwinViewer({
     occupancyAssessment.zones.forEach((zone, i) => {
       const b = zone.bounds;
       const geometry = new THREE.PlaneGeometry(b.width - 0.15, b.depth);
-      const material = new THREE.MeshBasicMaterial({ color: colors[i % colors.length], transparent: true,
-        opacity: 0.3, side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+      const material = new THREE.MeshBasicMaterial({
+        color: colors[i % colors.length], transparent: true,
+        opacity: 0.3, side: THREE.DoubleSide, depthTest: false, depthWrite: false
+      });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.set(b.x, 0.2, b.z);
@@ -1117,22 +1157,51 @@ export default function VenueTwinViewer({
             {
               tireTracemarks: tireTracksRef.current ?? undefined,
               onStatusChange: (status) => {
-                onEmergencyStatusChange?.("AMB-001", status, status === "AT_INCIDENT" ? 0 : (ambRerouted ? 91 : 72));
+                const remSec = ambCtrl.getRemainingTimeSec();
+                onEmergencyStatusChange?.("AMB-001", status, status === "AT_INCIDENT" ? 0 : remSec);
+              },
+              onEtaUpdate: (remainingSec, remainingDist) => {
+                setLiveAmbEta({
+                  status: ambCtrl.status,
+                  remainingSec,
+                  remainingDist,
+                });
+                onAmbulanceEtaChange?.(remainingSec, Math.round(remainingDist * 5), ambCtrl.status);
               },
               onRouteComplete: () => {
+                setLiveAmbEta({
+                  status: "AT_INCIDENT",
+                  remainingSec: 0,
+                  remainingDist: 0,
+                });
                 onEmergencyStatusChange?.("AMB-001", "AT_INCIDENT", 0);
+                onAmbulanceEtaChange?.(0, 0, "AT_INCIDENT");
               },
             }
           );
           ambCtrl.setRouteVisual(ambRoute);
           ambCtrl.dispatch();
           ambControllerRef.current = ambCtrl;
-          onEmergencyStatusChange?.("AMB-001", "DISPATCHED", ambRerouted ? 91 : 72);
+          const initialEta = ambCtrl.getRemainingTimeSec();
+          setLiveAmbEta({
+            status: "DISPATCHED",
+            remainingSec: initialEta,
+            remainingDist: ambCtrl.getRemainingDistance(),
+          });
+          onEmergencyStatusChange?.("AMB-001", "DISPATCHED", initialEta);
+          onAmbulanceEtaChange?.(initialEta, Math.round(ambCtrl.getRemainingDistance() * 5), "DISPATCHED");
         } else if (ambRerouted) {
           ambControllerRef.current.tireTracemarks = tireTracksRef.current ?? undefined;
           ambControllerRef.current.reroute(ambWps);
           ambControllerRef.current.setRouteVisual(ambRoute);
-          onEmergencyStatusChange?.("AMB-001", "EN_ROUTE", 91);
+          const rerouteEta = ambControllerRef.current.getRemainingTimeSec();
+          setLiveAmbEta({
+            status: "EN_ROUTE",
+            remainingSec: rerouteEta,
+            remainingDist: ambControllerRef.current.getRemainingDistance(),
+          });
+          onEmergencyStatusChange?.("AMB-001", "EN_ROUTE", rerouteEta);
+          onAmbulanceEtaChange?.(rerouteEta, Math.round(ambControllerRef.current.getRemainingDistance() * 5), "EN_ROUTE");
         }
       }
 
@@ -1171,13 +1240,14 @@ export default function VenueTwinViewer({
     } else {
       // Standby / reset
       tireTracksRef.current?.clear();
+      setLiveAmbEta(null);
       if (ambControllerRef.current) {
         ambControllerRef.current.reset(ANCHORS.AMBULANCE.position);
         ambControllerRef.current = null;
       } else {
         const amb = scene.getObjectByName("AMB-001");
         if (amb) {
-          amb.position.set(ANCHORS.AMBULANCE.position.x, 1.95, ANCHORS.AMBULANCE.position.z);
+          amb.position.set(ANCHORS.AMBULANCE.position.x, ANCHORS.AMBULANCE.position.y, ANCHORS.AMBULANCE.position.z);
           amb.rotation.set(0, 0, 0);
           TwinAssetLibrary.updateAmbulanceStandby(amb);
         }
@@ -1236,7 +1306,7 @@ export default function VenueTwinViewer({
       // Focus camera on Road 17
       focusCamera("FOCUS_ROAD17");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [simViewMode, densityHigh]);
 
   // ── Camera helpers ────────────────────────────────────────────────────────
@@ -1252,8 +1322,8 @@ export default function VenueTwinViewer({
         setSelectedObj(allWorldObjects.find((o) => o.id === "gate_2") ?? null);
         break;
       case "FOCUS_ROAD17":
-        cam.position.set(32, 24, -2); cam.lookAt(16, 0, -16);
-        setSelectedObj(allWorldObjects.find((o) => o.id === "road_17") ?? null);
+        cam.position.set(22, 10, -18); cam.lookAt(10.0, 2.00, -26);
+        setSelectedObj(allWorldObjects.find((o) => o.id === "AMB-001") ?? allWorldObjects.find((o) => o.id === "road_17") ?? null);
         onFocusElement?.("road_17");
         break;
       case "FOCUS_AUDITORIUM":
@@ -1279,7 +1349,7 @@ export default function VenueTwinViewer({
       const cam = cameraRef.current;
       if (cam) { cam.position.set(0, 18, 8); cam.lookAt(0, 0, -11); }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedElementId]);
 
   // ── Add infrastructure ────────────────────────────────────────────────────
@@ -1291,7 +1361,7 @@ export default function VenueTwinViewer({
         id, type,
         name: type === "barricade" ? "Crowd Barricade Barrier"
           : type === "medical_tent" ? "Medical First Aid Station"
-          : "Security Checkpoint Arch",
+            : "Security Checkpoint Arch",
         position: { x: (Math.random() - 0.5) * 16, y: 0, z: 8 + Math.random() * 8 },
         properties: { status: "OPEN" },
       },
@@ -1300,11 +1370,11 @@ export default function VenueTwinViewer({
 
   // ─────────────────────────────────────────────────────────────────────────
   const SIM_MODES: { key: SimViewMode; icon: React.ReactNode; label: string; color: string }[] = [
-    { key: "3D",         icon: <Eye className="w-3 h-3" />,      label: "3D",       color: "indigo" },
-    { key: "TOP",        icon: <Layers className="w-3 h-3" />,   label: "Top",      color: "indigo" },
-    { key: "SIMULATION", icon: <Activity className="w-3 h-3" />, label: "Sim",      color: "cyan"   },
-    { key: "DENSITY",    icon: <Zap className="w-3 h-3" />,      label: "Density",  color: "amber"  },
-    { key: "EMERGENCY",  icon: <Shield className="w-3 h-3" />,   label: "Emerg",    color: "rose"   },
+    { key: "3D", icon: <Eye className="w-3 h-3" />, label: "3D", color: "indigo" },
+    { key: "TOP", icon: <Layers className="w-3 h-3" />, label: "Top", color: "indigo" },
+    { key: "SIMULATION", icon: <Activity className="w-3 h-3" />, label: "Sim", color: "cyan" },
+    { key: "DENSITY", icon: <Zap className="w-3 h-3" />, label: "Density", color: "amber" },
+    { key: "EMERGENCY", icon: <Shield className="w-3 h-3" />, label: "Emerg", color: "rose" },
   ];
 
   const simModeActive = (k: SimViewMode) =>
@@ -1313,31 +1383,32 @@ export default function VenueTwinViewer({
       : "bg-slate-800 text-slate-400 hover:text-white";
 
   return (
-    <div className="relative w-full aspect-square lg:aspect-[16/10] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-2xl flex flex-col select-none">
+    <div className="relative w-full aspect-square lg:aspect-[16/10] bg-slate-100 border border-slate-200/90 rounded-2xl overflow-hidden shadow-sm flex flex-col select-none">
 
       {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="absolute top-0 left-0 right-0 z-10 px-3 py-2 bg-slate-900/90 backdrop-blur border-b border-slate-800 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <Layers className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-          <span className="text-xs font-bold text-white tracking-wide uppercase whitespace-nowrap">
+      <div className="absolute top-2.5 left-2.5 right-2.5 z-10 px-3.5 py-2 bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-xl shadow-sm flex items-center justify-between gap-3 text-slate-800">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+          <span className="text-xs font-semibold text-slate-800 tracking-tight whitespace-nowrap">
             3D Digital Twin
           </span>
-          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 whitespace-nowrap">
-            {worldVersion.split(":")[0]}
+          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
+            {worldVersion.split(":")[0]} ▾
           </span>
           {cityLoading ? (
-            <span className="flex items-center gap-1 text-[9px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 whitespace-nowrap">
-              <Loader2 className="w-2.5 h-2.5 animate-spin" />Loading city…
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-slate-500 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 whitespace-nowrap">
+              <Loader2 className="w-2.5 h-2.5 animate-spin text-slate-500" />Loading model…
             </span>
           ) : cityLoadError ? (
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 whitespace-nowrap">⚠ Procedural</span>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 whitespace-nowrap">Procedural</span>
           ) : (
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800 whitespace-nowrap">✓ city.glb</span>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200 whitespace-nowrap">✓ city.glb</span>
           )}
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <div className="flex items-center rounded bg-slate-950 border border-slate-800 p-0.5 gap-0.5">
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Segmented View Controller */}
+          <div className="flex items-center rounded-full bg-slate-100 p-0.5 border border-slate-200 gap-0.5 shadow-inner">
             {SIM_MODES.map(({ key, icon, label }) => (
               <button
                 key={key}
@@ -1348,14 +1419,10 @@ export default function VenueTwinViewer({
                   else if (key === "EMERGENCY") focusCamera("FOCUS_ROAD17");
                 }}
                 title={label}
-                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium transition ${
-                  simViewMode === key
-                    ? key === "EMERGENCY" ? "bg-rose-600 text-white"
-                      : key === "DENSITY" ? "bg-amber-600 text-white"
-                      : key === "SIMULATION" ? "bg-cyan-700 text-white"
-                      : "bg-indigo-600 text-white"
-                    : "text-slate-400 hover:text-white"
-                }`}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all ${simViewMode === key
+                    ? "bg-[#7c3aed] text-white shadow-sm font-semibold"
+                    : "text-slate-600 hover:text-slate-900"
+                  }`}
               >
                 {icon}
                 <span className="hidden sm:inline">{label}</span>
@@ -1367,11 +1434,10 @@ export default function VenueTwinViewer({
           <button
             onClick={handleToggleLabels}
             title={showLabels ? "Hide 3D Floating Badges (hover still works)" : "Show 3D Floating Badges"}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
-              showLabels
-                ? "bg-cyan-600 text-white border-cyan-500 shadow-sm shadow-cyan-500/20"
-                : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white"
-            }`}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all ${showLabels
+                ? "bg-[#7c3aed] text-white font-semibold border-[#7c3aed] shadow-xs"
+                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
           >
             <Eye className="w-3 h-3" />
             <span className="hidden sm:inline">Labels: {showLabels ? "ON" : "OFF"}</span>
@@ -1381,11 +1447,10 @@ export default function VenueTwinViewer({
           <button
             onClick={handleTriggerEvacuate}
             title="Trigger active crowd evacuation stream towards Central Assembly Area"
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
-              isEvacuating
-                ? "bg-amber-600 text-white border-amber-500 animate-pulse shadow-sm shadow-amber-500/20"
-                : "bg-emerald-950/80 text-emerald-300 border-emerald-700 hover:bg-emerald-900"
-            }`}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border transition-all ${isEvacuating
+                ? "bg-amber-100 text-amber-800 border-amber-300 animate-pulse shadow-sm"
+                : "bg-[#7c3aed] text-white border-[#7c3aed] hover:bg-[#6d28d9] shadow-xs"
+              }`}
           >
             <Navigation className="w-3 h-3" />
             <span className="hidden sm:inline">{isEvacuating ? "Evacuating..." : "Evacuate"}</span>
@@ -1396,11 +1461,10 @@ export default function VenueTwinViewer({
             <button
               onClick={handleDeployExtinguisher}
               title="Deploy chemical foam extinguisher from FE-002"
-              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
-                isExtinguishing
-                  ? "bg-rose-600 text-white border-rose-500 animate-pulse shadow-sm shadow-rose-500/20"
-                  : "bg-rose-950/90 text-rose-300 border-rose-700 hover:bg-rose-900"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold border transition-all ${isExtinguishing
+                  ? "bg-rose-600 text-white border-rose-500 animate-pulse shadow-sm"
+                  : "bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-200"
+                }`}
             >
               <Flame className="w-3 h-3" />
               <span className="hidden sm:inline">{isExtinguishing ? "Spraying..." : "Extinguisher"}</span>
@@ -1409,11 +1473,10 @@ export default function VenueTwinViewer({
 
           <button
             onClick={() => setShowAssetPalette((p) => !p)}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border transition ${
-              showAssetPalette
-                ? "bg-indigo-600 text-white border-indigo-500"
-                : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700"
-            }`}
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all ${showAssetPalette
+                ? "bg-slate-200 text-slate-900 border-slate-300"
+                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 shadow-xs"
+              }`}
           >
             <Plus className="w-3 h-3" />Palette
           </button>
@@ -1422,58 +1485,126 @@ export default function VenueTwinViewer({
 
       {/* ── GLB Loading overlay ──────────────────────────────────────────── */}
       {cityLoading && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm pointer-events-none">
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/75 backdrop-blur-md pointer-events-none">
           <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-10 h-10 text-cyan-400 animate-spin" />
-            <p className="text-sm text-slate-200 font-semibold">Loading 3D City Model…</p>
-            <p className="text-xs text-slate-500 font-mono">city.glb — EventFlow Digital Twin</p>
+            <Loader2 className="w-8 h-8 text-zinc-400 animate-spin" />
+            <p className="text-xs text-zinc-200 font-semibold tracking-tight">Loading 3D Spatial Geometry…</p>
+            <p className="text-[10px] text-zinc-500 font-mono">city.glb &bull; EventFlow Digital Twin</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Apple Dynamic Island Real-Time Ambulance HUD ────────────── */}
+      {isFireActive && (
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex flex-col items-center max-w-[94%] sm:max-w-md animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className={`px-4 py-2 sm:px-5 sm:py-2.5 rounded-full border shadow-[0_12px_36px_rgba(0,0,0,0.7)] backdrop-blur-2xl flex items-center gap-3.5 transition-all duration-300 ${liveAmbEta?.status === "AT_INCIDENT"
+              ? "bg-zinc-950/90 border-emerald-500/40 text-emerald-200 shadow-[0_0_24px_rgba(16,185,129,0.25)]"
+              : "bg-zinc-950/90 border-white/[0.12] text-white"
+            }`}>
+            <div className="relative flex items-center justify-center shrink-0 w-8 h-8 rounded-full bg-white/10 text-white">
+              <Siren className="w-4 h-4 text-amber-400 animate-pulse" />
+              {liveAmbEta?.status !== "AT_INCIDENT" && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-semibold tracking-tight text-zinc-200 truncate">
+                  Ambulance 01 <span className="text-zinc-500 font-mono text-[10px]">MEDIC-17</span>
+                </span>
+                <span className={`text-[9px] font-mono font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${liveAmbEta?.status === "AT_INCIDENT"
+                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                  }`}>
+                  {liveAmbEta?.status === "AT_INCIDENT" ? "ARRIVED AT SCENE" : "EN ROUTE · SLOW"}
+                </span>
+              </div>
+
+              <div className="flex items-baseline gap-1.5 sm:gap-2 mt-0.5 flex-wrap">
+                <span className="text-[10px] text-zinc-400 font-medium whitespace-nowrap">Destination ETA:</span>
+                <span className={`font-mono font-bold tracking-tight ${liveAmbEta?.status === "AT_INCIDENT"
+                    ? "text-emerald-400 text-xs sm:text-sm"
+                    : "text-amber-300 text-sm sm:text-base drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]"
+                  }`}>
+                  {liveAmbEta?.status === "AT_INCIDENT"
+                    ? "00:00 (ARRIVED)"
+                    : `${Math.floor((liveAmbEta?.remainingSec ?? 29) / 60).toString().padStart(2, "0")}:${((liveAmbEta?.remainingSec ?? 29) % 60).toString().padStart(2, "0")}`}
+                </span>
+                <span className="text-[9px] text-zinc-500 font-mono whitespace-nowrap">
+                  ({Math.round((liveAmbEta?.remainingDist ?? 36) * 5)}m &bull; {ambRerouted ? "Bypass Lane" : "Road 17 Safe Lane"})
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {/* ── Fallback notice ──────────────────────────────────────────────── */}
       {cityLoadError && !cityLoading && (
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-lg bg-amber-950/90 border border-amber-700 text-[9px] font-mono text-amber-300 pointer-events-none whitespace-nowrap">
-          3D Asset unavailable — using procedural fallback
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-zinc-900/90 border border-white/[0.08] text-[9px] font-mono text-zinc-400 pointer-events-none whitespace-nowrap">
+          3D Asset unavailable &bull; procedural fallback
         </div>
       )}
 
       {/* ── Road 17 congestion alert ─────────────────────────────────────── */}
       {road17Congested && !cityLoading && (
-        <div className="absolute top-10 right-2 z-10 px-2 py-1 rounded bg-rose-950/95 border border-rose-700 text-[9px] font-mono text-rose-300 pointer-events-none animate-pulse">
-          🚑 ROAD 17 CONGESTED — Amb delay &gt;30s
+        <div className="absolute top-12 right-3 z-10 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-[10px] font-semibold text-rose-700 pointer-events-none flex items-center gap-1.5 shadow-sm">
+          <Siren className="w-3 h-3 text-rose-600" />
+          <span>Road 17 Congestion &gt;30s</span>
         </div>
       )}
 
       {/* ── Step-free badge ──────────────────────────────────────────────── */}
       {!cityLoading && (
-        <div className={`absolute top-12 left-2 z-10 px-2 py-0.5 rounded font-mono text-[9px] pointer-events-none ${
-          stepFreeOk
-            ? "bg-cyan-950/90 border border-cyan-800 text-cyan-300"
-            : "bg-rose-950/90 border border-rose-700 text-rose-300 animate-pulse"
-        }`}>
-          {stepFreeOk ? "♿ STEP-FREE ✓" : "⚠ ACCESSIBILITY VIOLATION"}
+        <div className={`absolute top-14 left-3 z-10 px-3 py-1 rounded-full text-xs font-semibold pointer-events-none border shadow-sm flex items-center gap-1.5 ${stepFreeOk
+            ? "bg-[#f3e8ff] border-purple-200 text-[#7c3aed]"
+            : "bg-rose-100 border-rose-300 text-rose-700 animate-pulse"
+          }`}>
+          {stepFreeOk ? (
+            <>
+              <Accessibility className="w-3.5 h-3.5 text-[#7c3aed]" />
+              <span>Step-Free Route Active</span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Accessibility Violation</span>
+            </>
+          )}
         </div>
       )}
 
       {/* ── Density overlay label ────────────────────────────────────────── */}
       {simViewMode === "DENSITY" && !cityLoading && (
-        <div className="absolute top-18 left-1/2 -translate-x-1/2 z-10 px-2 py-0.5 rounded bg-amber-950/90 border border-amber-700 text-[9px] font-mono text-amber-300 pointer-events-none whitespace-nowrap">
-          DENSITY VIEW — {densityHigh ? "⚠ HIGH CONGESTION" : "Normal"} — SYNTHETIC_MODELED_CROWD
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-white/95 border border-slate-200 text-[10px] font-medium text-slate-700 shadow-sm pointer-events-none whitespace-nowrap flex items-center gap-1.5">
+          <span>DENSITY VIEW</span>
+          <span>&bull;</span>
+          {densityHigh ? (
+            <span className="text-amber-700 font-semibold flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 text-amber-600" /> High Congestion
+            </span>
+          ) : (
+            <span className="text-emerald-700 font-semibold">Nominal</span>
+          )}
+          <span>&bull;</span>
+          <span className="text-slate-400">Synthetic</span>
         </div>
       )}
 
       {/* ── Plan indicator strip ─────────────────────────────────────────── */}
       {planMetrics && !cityLoading && simViewMode === "SIMULATION" && (
-        <div className="absolute top-18 left-2 z-10 flex flex-col gap-0.5 pointer-events-none">
-          <div className={`px-2 py-0.5 rounded text-[9px] font-mono border ${
-            planMetrics.isPass
-              ? "bg-emerald-950/90 border-emerald-800 text-emerald-300"
-              : "bg-rose-950/90 border-rose-800 text-rose-300"
-          }`}>
-            {planMetrics.isPass ? "✓" : "✗"} {planMetrics.planName.slice(0, 20)}…
+        <div className="absolute top-20 left-3 z-10 flex flex-col gap-1 pointer-events-none">
+          <div className={`px-2.5 py-0.5 rounded-full text-[10px] font-medium border shadow-xs ${planMetrics.isPass
+              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+              : "bg-rose-50 border-rose-200 text-rose-700"
+            }`}>
+            {planMetrics.isPass ? "✓" : "✗"} {planMetrics.planName.slice(0, 22)}…
           </div>
-          <div className="px-2 py-0.5 rounded text-[9px] font-mono bg-slate-900/90 border border-slate-700 text-slate-300">
+          <div className="px-2.5 py-0.5 rounded-full text-[9px] font-mono bg-white/95 border border-slate-200 text-slate-600 shadow-xs">
             P95: {planMetrics.p95ExitDisplay} | Amb: {planMetrics.ambDelaySec}s
           </div>
         </div>
@@ -1481,12 +1612,12 @@ export default function VenueTwinViewer({
 
       {/* ── World v2 delta badge ─────────────────────────────────────────── */}
       {blockedGate && !cityLoading && (
-        <div className="absolute top-18 right-2 z-10 pointer-events-none">
-          <div className="bg-slate-900/95 border border-amber-700/60 rounded p-2 text-[9px] font-mono text-slate-300 space-y-0.5 max-w-[140px]">
-            <div className="text-amber-400 font-bold">World v2 Delta</div>
-            <div>Gate 2 <span className="text-red-400">BLOCKED</span></div>
-            <div>Crowd <span className="text-amber-400">REROUTED</span></div>
-            {road17Congested && <div>Road 17 <span className="text-red-400">CONGESTED</span></div>}
+        <div className="absolute top-20 right-3 z-10 pointer-events-none">
+          <div className="bg-white/95 border border-slate-200 rounded-xl p-2.5 text-[10px] text-slate-700 space-y-0.5 max-w-[150px] shadow-md">
+            <div className="text-amber-600 font-bold">World v2 Delta</div>
+            <div>Gate 2 <span className="text-rose-600 font-semibold">BLOCKED</span></div>
+            <div>Crowd <span className="text-amber-600 font-semibold">REROUTED</span></div>
+            {road17Congested && <div>Road 17 <span className="text-rose-600 font-semibold">CONGESTED</span></div>}
           </div>
         </div>
       )}
@@ -1496,156 +1627,166 @@ export default function VenueTwinViewer({
 
       {/* ── Asset Palette ────────────────────────────────────────────────── */}
       {showAssetPalette && (
-        <div className="absolute top-10 right-2 z-20 w-44 bg-slate-900/97 border border-slate-800 rounded-lg p-2.5 shadow-2xl flex flex-col gap-2 backdrop-blur text-xs">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-1">
-            <span className="font-bold text-slate-200 text-[11px]">3D Asset Palette</span>
-            <button onClick={() => setShowAssetPalette(false)} className="text-slate-400 hover:text-white"><X className="w-3 h-3" /></button>
+        <div className="absolute top-14 right-3 z-20 w-48 bg-white border border-slate-200/90 rounded-2xl p-3.5 shadow-xl flex flex-col gap-2 text-xs text-slate-800">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+            <span className="font-semibold text-slate-800 text-xs">3D Palette</span>
+            <button onClick={() => setShowAssetPalette(false)} className="text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
           </div>
           {(["barricade", "checkpoint", "medical_tent"] as const).map((t) => (
             <button
               key={t}
               onClick={() => handleAddInfrastructure(t)}
-              className="w-full text-left px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-between text-[10px]"
+              className="w-full text-left px-2.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200/60 text-slate-700 flex items-center justify-between text-xs transition"
             >
-              <span>+ {t === "barricade" ? "Barricade" : t === "checkpoint" ? "Security Arch" : "First Aid Tent"}</span>
-              <span className={`font-mono ${t === "medical_tent" ? "text-rose-400" : t === "checkpoint" ? "text-indigo-400" : "text-amber-400"}`}>
+              <span className="font-medium flex items-center gap-1.5">
+                {t === "barricade" ? "Barricade" : t === "checkpoint" ? "Security Arch" : "First Aid Tent"}
+              </span>
+              <span className={`font-semibold text-[10px] px-2 py-0.5 rounded-full ${
+                t === "medical_tent"
+                  ? "bg-rose-100 text-rose-700"
+                  : t === "checkpoint"
+                  ? "bg-purple-100 text-purple-700"
+                  : "bg-amber-100 text-amber-700"
+              }`}>
                 {t === "barricade" ? "Infra" : t === "checkpoint" ? "Control" : "Emerg"}
               </span>
             </button>
           ))}
           {cityLoadInfo && (
-            <div className="border-t border-slate-800 pt-1 text-[8px] font-mono text-slate-600 leading-tight break-all">{cityLoadInfo}</div>
+            <div className="border-t border-slate-100 pt-1.5 text-[8px] font-mono text-slate-400 leading-tight break-all">{cityLoadInfo}</div>
           )}
         </div>
       )}
 
-      {/* ── Building / Block Options Menu Card (Click to Pin or Hover to Preview) ── */}
+      {/* ── Building / Block Options Menu Card (Light SaaS Pinned Inspection Card) ── */}
       {(pinnedBlock || hoveredInfo) && (
         <div
           style={{
-            left: Math.max(12, Math.min((pinnedBlock || hoveredInfo)!.x + 14, (containerRef.current?.clientWidth ?? 700) - 290)),
-            top: Math.max(45, Math.min((pinnedBlock || hoveredInfo)!.y + 14, (containerRef.current?.clientHeight ?? 500) - 290)),
+            left: Math.max(12, Math.min((pinnedBlock || hoveredInfo)!.x + 14, (containerRef.current?.clientWidth ?? 700) - 300)),
+            top: Math.max(50, Math.min((pinnedBlock || hoveredInfo)!.y + 14, (containerRef.current?.clientHeight ?? 500) - 300)),
           }}
-          className={`absolute z-30 w-72 bg-slate-900/98 border shadow-2xl rounded-xl p-3.5 backdrop-blur pointer-events-auto transition-all ${
-            pinnedBlock
-              ? "border-cyan-400 shadow-cyan-500/20 ring-1 ring-cyan-500/30"
-              : "border-slate-700/80 shadow-black/60"
-          }`}
+          className={`absolute z-30 w-80 bg-white/95 backdrop-blur-xl rounded-2xl p-4 shadow-xl border pointer-events-auto transition-all text-slate-800 ${pinnedBlock
+              ? "border-slate-300 ring-2 ring-purple-500/20 shadow-2xl"
+              : "border-slate-200"
+            }`}
         >
           {/* Header */}
-          <div className="flex items-start justify-between gap-1.5 border-b border-slate-800 pb-2 mb-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xl shrink-0">{(pinnedBlock || hoveredInfo)!.icon}</span>
+          <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5 mb-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center shrink-0">
+                {renderBlockIcon((pinnedBlock || hoveredInfo)!.icon)}
+              </div>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-white truncate">
+                <div className="text-xs font-bold text-slate-900 truncate tracking-tight">
                   {(pinnedBlock || hoveredInfo)!.name}
                 </div>
-                <div className="text-[10px] font-mono text-cyan-400 truncate">{(pinnedBlock || hoveredInfo)!.blockCode}</div>
+                <div className="text-[10px] text-slate-500 truncate">{(pinnedBlock || hoveredInfo)!.blockCode}</div>
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
-              {pinnedBlock && (
-                <span className="text-[8px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-700">
-                  📌 PINNED
-                </span>
-              )}
-              {pinnedBlock ? (
-                <button
-                  onClick={() => {
-                    setPinnedBlock(null);
-                    pinnedBlockRef.current = null;
-                    setSelectedObj(null);
-                    if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
-                  }}
-                  className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                  title="Close / Unpin Card"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border ${(pinnedBlock || hoveredInfo)!.statusColor}`}>
-                  {(pinnedBlock || hoveredInfo)!.statusText}
-                </span>
-              )}
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                Planned
+              </span>
+              <button
+                onClick={() => {
+                  setPinnedBlock(null);
+                  pinnedBlockRef.current = null;
+                  setSelectedObj(null);
+                  if (hoverOutlineRef.current) hoverOutlineRef.current.visible = false;
+                }}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                title="Close / Unpin Card"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
-          <p className="text-[10px] text-slate-300 leading-relaxed mb-2.5">
+          <p className="text-xs text-slate-600 leading-relaxed mb-3">
             {(pinnedBlock || hoveredInfo)!.description}
           </p>
 
           {(pinnedBlock || hoveredInfo)!.capacity !== undefined && (
-            <div className="flex justify-between items-center text-[10px] text-slate-400 mb-2 border-t border-slate-800/80 pt-1.5">
-              <span>Capacity:</span>
-              <span className="font-mono text-slate-200 font-semibold">{(pinnedBlock || hoveredInfo)!.capacity!.toLocaleString()} occupants</span>
+            <div className="flex justify-between items-center text-xs text-slate-500 mb-3 border-t border-slate-100 pt-2">
+              <span>Capacity Target:</span>
+              <span className="font-semibold text-slate-800">{(pinnedBlock || hoveredInfo)!.capacity!.toLocaleString()} occupants</span>
             </div>
           )}
 
           {/* Interactive Options Menu */}
-          <div className="flex flex-col gap-1.5 pt-1.5 border-t border-slate-800">
-            <div className="text-[9px] font-mono text-slate-400 font-semibold uppercase tracking-wider flex items-center justify-between">
-              <span>Options &amp; Actions</span>
-              {!pinnedBlock && (
-                <span className="text-[8px] text-cyan-400 font-sans normal-case">Click block to pin options</span>
-              )}
+          <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              ACTIONS
             </div>
 
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleTriggerEvacuate}
+                className={`col-span-2 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 border transition shadow-xs ${isEvacuating
+                    ? "bg-amber-100 text-amber-800 border-amber-300 animate-pulse"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100"
+                  }`}
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                <span>{isEvacuating ? "Evacuating..." : "Evacuate Campus"}</span>
+              </button>
+
               {(pinnedBlock || hoveredInfo)!.cameraPreset && (
                 <button
                   onClick={() => focusCamera((pinnedBlock || hoveredInfo)!.cameraPreset!)}
-                  className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-slate-700 transition shadow-sm"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium flex items-center justify-center gap-1 border border-slate-200 transition"
                 >
-                  🎯 Focus View
+                  <LocateFixed className="w-3 h-3 text-purple-600" />
+                  <span>Focus</span>
                 </button>
               )}
-
-              <button
-                onClick={handleTriggerEvacuate}
-                className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition shadow-sm ${
-                  isEvacuating
-                    ? "bg-amber-900/90 hover:bg-amber-800 text-amber-200 border-amber-600 font-bold animate-pulse"
-                    : "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
-                }`}
-              >
-                🏃 {isEvacuating ? "Evacuating..." : "Evacuate"}
-              </button>
 
               {isFireActive && (
                 <button
                   onClick={handleDeployExtinguisher}
-                  className="px-2 py-1.5 rounded bg-rose-900/90 hover:bg-rose-800 text-rose-200 text-[10px] font-medium flex items-center justify-center gap-1 border border-rose-600 transition shadow-sm"
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 text-xs font-medium flex items-center justify-center gap-1 transition"
                 >
-                  🧯 Extinguish
+                  <Flame className="w-3 h-3 text-rose-600" />
+                  <span>Extinguish</span>
                 </button>
               )}
 
               {(pinnedBlock || hoveredInfo)!.isGate && (pinnedBlock || hoveredInfo)!.id && (
                 <button
                   onClick={() => onToggleGateBlock((pinnedBlock || hoveredInfo)!.id)}
-                  className={`px-2 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1 border transition shadow-sm ${
-                    (pinnedBlock || hoveredInfo)!.isBlocked
-                      ? "bg-emerald-950/90 hover:bg-emerald-900 text-emerald-300 border-emerald-700"
-                      : "bg-rose-950/90 hover:bg-rose-900 text-rose-300 border-rose-700"
-                  }`}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1 border transition ${(pinnedBlock || hoveredInfo)!.isBlocked
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                      : "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                    }`}
                 >
-                  {(pinnedBlock || hoveredInfo)!.isBlocked ? "🟢 Open Gate" : "⛔ Block Gate"}
+                  {(pinnedBlock || hoveredInfo)!.isBlocked ? (
+                    <>
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      <span>Open Gate</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-3 h-3 text-rose-600" />
+                      <span>Block Gate</span>
+                    </>
+                  )}
                 </button>
               )}
 
               {(pinnedBlock || hoveredInfo)!.obj && (
                 <button
                   onClick={() => setShowInspectorDetails((p) => !p)}
-                  className="px-2 py-1.5 rounded bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 text-[10px] font-medium flex items-center justify-center gap-1 border border-indigo-700 col-span-2 transition shadow-sm"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-medium flex items-center justify-center gap-1 border border-slate-200 col-span-2 transition"
                 >
-                  {showInspectorDetails ? "▲ Hide Technical Specs" : "🔍 Inspect Technical Specs"}
+                  <Sliders className="w-3 h-3" />
+                  <span>{showInspectorDetails ? "Hide Specs" : "Inspect Technical Specs"}</span>
                 </button>
               )}
             </div>
 
             {/* Expanded Detailed Properties when Inspect Technical Specs is clicked */}
             {showInspectorDetails && (pinnedBlock || hoveredInfo)!.obj && (
-              <div className="mt-2 pt-2 border-t border-slate-800 text-[9px] space-y-1 text-slate-300 font-mono">
+              <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] space-y-1 text-slate-600 font-mono bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                 <Row label="ID" value={(pinnedBlock || hoveredInfo)!.obj!.id} mono />
                 <Row label="Type" value={(pinnedBlock || hoveredInfo)!.obj!.type.toUpperCase()} mono color="cyan" />
                 <Row label="Status" value={(pinnedBlock || hoveredInfo)!.statusText} mono />
@@ -1667,50 +1808,63 @@ export default function VenueTwinViewer({
         </div>
       )}
 
-      {/* ── Bottom toolbar ───────────────────────────────────────────────── */}
-      <div className="absolute bottom-1 left-1 right-1 z-10 px-2 py-1 bg-slate-900/90 backdrop-blur border border-slate-800 rounded-lg flex items-center justify-between gap-1">
-        <div className="flex items-center gap-1 text-[9px] flex-wrap">
-          <span className="text-slate-600">Cam:</span>
+      {/* ── Apple Floating Pill Bottom Toolbar ───────────────────────────────────────────────── */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3.5 py-1.5 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-full flex items-center gap-2 shadow-lg max-w-[95%] overflow-x-auto text-slate-700">
+        <div className="flex items-center gap-1 text-xs whitespace-nowrap">
+          <span className="text-slate-400 mr-1 font-medium">Cam:</span>
           {([
             { mode: "PERSPECTIVE" as CameraViewMode, label: "Orbit" },
-            { mode: "TOP_DOWN" as CameraViewMode, label: "Top↓" },
-            { mode: "FOCUS_AUDITORIUM" as CameraViewMode, label: "🏢 Hall" },
-            { mode: "FOCUS_GATE2" as CameraViewMode, label: "G2" },
-            { mode: "FOCUS_ROAD17" as CameraViewMode, label: "🚑 R17" },
+            { mode: "TOP_DOWN" as CameraViewMode, label: "Top" },
+            { mode: "FOCUS_AUDITORIUM" as CameraViewMode, label: "Auditorium" },
+            { mode: "FOCUS_GATE2" as CameraViewMode, label: "Gate 2" },
+            { mode: "FOCUS_ROAD17" as CameraViewMode, label: "Road 17" },
             { mode: "FOCUS_ASSEMBLY" as CameraViewMode, label: "Assembly" },
           ] as const).map(({ mode, label }) => (
             <button
               key={mode}
               onClick={() => focusCamera(mode)}
-              className={`px-1.5 py-0.5 rounded transition ${
-                cameraViewMode === mode
-                  ? mode === "FOCUS_ROAD17" ? "bg-rose-600 text-white"
-                    : mode === "FOCUS_ASSEMBLY" ? "bg-emerald-600 text-white"
-                    : "bg-indigo-600 text-white"
-                  : "bg-slate-800 text-slate-400 hover:text-white"
-              }`}
+              className={`px-3 py-1 rounded-full text-xs transition-all ${cameraViewMode === mode
+                  ? "bg-[#f3e8ff] text-[#7c3aed] font-bold shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+                }`}
             >
               {label}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0 text-[10px]">
+        <div className="h-4 w-px bg-slate-200 shrink-0" />
+
+        <div className="flex items-center gap-1.5 shrink-0 text-xs">
           {blockedGate ? (
             <button
               onClick={() => onToggleGateBlock(blockedGate)}
-              className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1"
+              className="text-amber-800 hover:text-amber-900 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 border border-amber-300 shadow-xs"
             >
               <RotateCcw className="w-3 h-3" />Unblock {blockedGate.toUpperCase()}
             </button>
           ) : (
             <button
               onClick={() => onToggleGateBlock("gate_2")}
-              className="text-indigo-400 hover:text-indigo-300 font-bold"
+              className="text-slate-600 hover:text-slate-900 font-medium px-3 py-1 rounded-full hover:bg-slate-100 transition"
             >
               Block Gate 2
             </button>
           )}
+
+          <button
+            onClick={() => {
+              if (!document.fullscreenElement) {
+                containerRef.current?.parentElement?.requestFullscreen();
+              } else {
+                document.exitFullscreen();
+              }
+            }}
+            className="p-1 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition ml-1"
+            title="Toggle Fullscreen"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     </div>
@@ -1724,10 +1878,10 @@ function Row({
 }: { label: string; value: string; mono?: boolean; color?: string }) {
   const colorClass =
     color === "cyan" ? "text-cyan-400"
-    : color === "rose" ? "text-rose-400"
-    : color === "amber" ? "text-amber-400"
-    : color === "emerald" ? "text-emerald-400"
-    : "text-slate-200";
+      : color === "rose" ? "text-rose-400"
+        : color === "amber" ? "text-amber-400"
+          : color === "emerald" ? "text-emerald-400"
+            : "text-slate-200";
   return (
     <div className="flex justify-between items-center">
       <span className="text-slate-500">{label}:</span>

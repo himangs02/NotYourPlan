@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import { Camera, AlertTriangle, Zap, Eye, ShieldAlert, Sparkles, RefreshCw, X, Radio, Video, CheckCircle2, Sliders } from "lucide-react";
+import { Camera, AlertTriangle, Zap, Eye, ShieldAlert, RefreshCw, X, Radio, Video, CheckCircle2, Sliders } from "lucide-react";
 
 interface OpticalSensorCameraProps {
   onEmergencyDetected?: (reason: string, intensity: number) => void;
@@ -246,37 +246,37 @@ export default function OpticalSensorCamera({
   const isTripped = alertTriggered || (isArmed && (delta >= 24 && luminosity >= 50 || luminosity >= threshold));
 
   return (
-    <div className="bg-slate-900/95 border border-slate-800 rounded-xl p-4 shadow-xl flex flex-col gap-3 backdrop-blur">
+    <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col gap-3 text-slate-800">
       {/* Hidden processing canvas */}
       <canvas ref={canvasRef} width={64} height={48} className="hidden" />
 
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
         <div className="flex items-center gap-2">
           <div className="relative">
-            <Camera className="w-4 h-4 text-cyan-400" />
+            <Camera className="w-4 h-4 text-purple-600" />
             <span
               className={`absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full ${
                 !isArmed
                   ? "bg-amber-400 animate-pulse"
                   : hasWebcam
-                  ? "bg-emerald-400 animate-ping"
-                  : "bg-slate-500"
+                  ? "bg-emerald-500 animate-ping"
+                  : "bg-slate-400"
               }`}
             />
           </div>
           <div>
-            <h3 className="font-semibold text-xs text-white flex items-center gap-1.5">
+            <h3 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
               Optical Mobile Torch Sensor
-              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
                 CAM-01
               </span>
             </h3>
-            <p className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+            <p className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
               {!isArmed ? (
-                <span className="text-amber-400">Calibrating Room Lighting...</span>
+                <span className="text-amber-600">Calibrating Room Lighting...</span>
               ) : hasWebcam ? (
-                <span className="text-emerald-400 flex items-center gap-1">
+                <span className="text-emerald-600 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3" /> Armed · Waiting for Torch Flash
                 </span>
               ) : (
@@ -297,14 +297,14 @@ export default function OpticalSensorCamera({
               }
             }}
             title="Toggle between real Webcam and simulated 3D Venue CCTV feed"
-            className="px-2 py-1 rounded bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] flex items-center gap-1 border border-slate-700/60"
+            className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] flex items-center gap-1 border border-slate-200 transition font-medium"
           >
-            <RefreshCw className="w-3 h-3" />
+            <RefreshCw className="w-3 h-3 text-slate-500" />
             <span>{hasWebcam ? "Switch to Sim" : "Connect Webcam"}</span>
           </button>
           <button
             onClick={() => setIsMinimized((p) => !p)}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
           >
             {isMinimized ? "▲" : "▼"}
           </button>

@@ -80,14 +80,14 @@ export function updateTextBadge(
   textColor: string = "#ffffff"
 ): void {
   const canvas = document.createElement("canvas");
-  canvas.width = 384;
+  canvas.width = 460;
   canvas.height = 96;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
   ctx.fillStyle = bgColor;
   ctx.beginPath();
-  ctx.roundRect(6, 6, 372, 84, 20);
+  ctx.roundRect(6, 6, 448, 84, 20);
   ctx.fill();
 
   ctx.lineWidth = 4;
@@ -95,10 +95,11 @@ export function updateTextBadge(
   ctx.stroke();
 
   ctx.fillStyle = textColor;
-  ctx.font = "bold 32px 'Segoe UI', system-ui, sans-serif";
+  const fontSize = text.length > 28 ? 22 : text.length > 20 ? 25 : 29;
+  ctx.font = `bold ${fontSize}px 'Segoe UI', system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 192, 48);
+  ctx.fillText(text, 230, 48);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -127,7 +128,7 @@ function randomBetween(a: number, b: number) {
 function spreadNear(wp: THREE.Vector3, spread = 3): THREE.Vector3 {
   return new THREE.Vector3(
     wp.x + randomBetween(-spread, spread),
-    1.95,
+    wp.y,
     wp.z + randomBetween(-spread, spread)
   );
 }
@@ -226,11 +227,11 @@ function ensureAgents(gate2Blocked: boolean) {
     new THREE.Vector3(-14, 1.95, 8),
     new THREE.Vector3(0, 1.95, 14),
     new THREE.Vector3(0, 1.95, 16),
-    new THREE.Vector3(16, 1.95, -16),
-    new THREE.Vector3(16, 1.95, -14),
+    new THREE.Vector3(12.0, 2.00, -16),
+    new THREE.Vector3(12.0, 2.00, -14),
   ];
 
-  _responderPositions = ROAD_17_CORRIDOR.map((wp) => spreadNear(wp, 1.5));
+  _responderPositions = ROAD_17_CORRIDOR.map((wp) => new THREE.Vector3(wp.x + 2.0, wp.y, wp.z + randomBetween(-0.5, 0.5)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -793,33 +794,37 @@ export class TwinAssetLibrary {
     if (isEmerg) baseColor = isCongested ? 0x991b1b : 0x881337;
     if (isStepFree) baseColor = 0x0891b2;
 
+    // Sleek holographic digital twin ground ribbon (lets city.glb asphalt show through!)
     const road = new THREE.Mesh(
-      new THREE.BoxGeometry(width, 0.25, length),
+      new THREE.BoxGeometry(width, 0.04, length),
       new THREE.MeshStandardMaterial({
         color: isSelected ? 0x6366f1 : baseColor,
-        roughness: 0.8,
-        metalness: 0.2,
+        roughness: 0.5,
+        metalness: 0.1,
+        transparent: true,
+        opacity: isSelected ? 0.45 : (isEmerg ? 0.22 : 0.4),
+        depthWrite: false,
       })
     );
-    road.position.y = 0.35;
+    road.position.y = 0.02;
     g.add(road);
 
     if (isEmerg) {
       // Center luminous emergency guide line
       const line = new THREE.Mesh(
-        new THREE.BoxGeometry(0.6, 0.3, length * 0.95),
-        new THREE.MeshBasicMaterial({ color: isCongested ? 0xf43f5e : 0xf43f5e })
+        new THREE.BoxGeometry(0.35, 0.05, length * 0.98),
+        new THREE.MeshBasicMaterial({ color: isCongested ? 0xf43f5e : 0x06b6d4, transparent: true, opacity: 0.85 })
       );
-      line.position.y = 0.36;
+      line.position.y = 0.03;
       g.add(line);
 
       // Warning glow overlay when compromised
       if (isCongested) {
         const warn = new THREE.Mesh(
-          new THREE.BoxGeometry(width * 0.95, 0.35, length * 0.95),
-          new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.45 })
+          new THREE.BoxGeometry(width * 0.95, 0.05, length * 0.98),
+          new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.35, depthWrite: false })
         );
-        warn.position.y = 0.38;
+        warn.position.y = 0.04;
         g.add(warn);
       }
 
@@ -1599,7 +1604,7 @@ export class TwinAssetLibrary {
    * Zero translation, engine idling, sirens off/standby, vehicle facing forward down Road 17.
    */
   public static updateAmbulanceStandby(ambGroup: THREE.Object3D): void {
-    ambGroup.position.set(ANCHORS.AMBULANCE.position.x, 1.95, ANCHORS.AMBULANCE.position.z);
+    ambGroup.position.set(ANCHORS.AMBULANCE.position.x, ANCHORS.AMBULANCE.position.y, ANCHORS.AMBULANCE.position.z);
     ambGroup.rotation.set(0, 0, 0); // Vehicle points +Z along Road 17
 
     const sirenRed = ambGroup.getObjectByName("siren_red") as THREE.Mesh;
@@ -1914,12 +1919,12 @@ export class AmbulanceTireTracemarks {
   private _createRoadSurfaceTreads(): void {
     const treadGeo = new THREE.BufferGeometry();
     const pts: THREE.Vector3[] = [];
-    // North-South paved Road 17 at x = 16.5
+    // North-South paved Road 17 at x = 10.0, y = 2.01
     for (let z = -28; z <= 8.0; z += 1.8) {
-      pts.push(new THREE.Vector3(16.5 - 1.15, 1.97, z));
-      pts.push(new THREE.Vector3(16.5 - 1.15, 1.97, z + 0.9));
-      pts.push(new THREE.Vector3(16.5 + 1.15, 1.97, z));
-      pts.push(new THREE.Vector3(16.5 + 1.15, 1.97, z + 0.9));
+      pts.push(new THREE.Vector3(10.0 - 1.15, 2.01, z));
+      pts.push(new THREE.Vector3(10.0 - 1.15, 2.01, z + 0.9));
+      pts.push(new THREE.Vector3(10.0 + 1.15, 2.01, z));
+      pts.push(new THREE.Vector3(10.0 + 1.15, 2.01, z + 0.9));
     }
     treadGeo.setFromPoints(pts);
     const treadMat = new THREE.LineBasicMaterial({
@@ -1940,7 +1945,7 @@ export class AmbulanceTireTracemarks {
     const perpX = Math.cos(heading);
     const perpZ = -Math.sin(heading);
     const halfWidth = 1.15;
-    const y = 1.97; // Elevated directly onto road surface
+    const y = pos.y + 0.02; // Directly onto road surface
 
     const curL = new THREE.Vector3(pos.x - perpX * halfWidth, y, pos.z - perpZ * halfWidth);
     const curR = new THREE.Vector3(pos.x + perpX * halfWidth, y, pos.z + perpZ * halfWidth);
@@ -2000,6 +2005,7 @@ export interface EmergencyVehicleControllerOptions {
   onRouteBlocked?: (blockedSegment: string) => void;
   onStatusChange?: (status: EmergencyVehicleStatus) => void;
   onProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+  onEtaUpdate?: (remainingSec: number, remainingDist: number) => void;
 }
 
 /**
@@ -2010,6 +2016,7 @@ export interface EmergencyVehicleControllerOptions {
  * - Smooth rotational heading interpolation (no instant snaps, backwards driving, or sliding)
  * - Progressive route tracing and arrow synchronization
  * - Synchronized status transitions: STANDBY -> DISPATCHED -> EN_ROUTE -> AT_INCIDENT
+ * - Real-time ETA and remaining distance tracking to destination
  */
 export class EmergencyVehicleController {
   public vehicle: THREE.Object3D;
@@ -2023,8 +2030,9 @@ export class EmergencyVehicleController {
   private _totalDist: number = 0;
   private _cumulativeDist: number[] = [];
   private _targetHeading: number = 0;
-  private _baseY: number = 1.95;
+  private _baseY: number = 2.00;
   private _sirenTimer: number = 0;
+  private _lastReportedSec: number = -1;
   private _routeVisualGroup?: THREE.Group & {
     updateProgress?: (progress: number, currentPos: THREE.Vector3) => void;
   };
@@ -2034,6 +2042,7 @@ export class EmergencyVehicleController {
   public onRouteBlocked?: (blockedSegment: string) => void;
   public onStatusChange?: (status: EmergencyVehicleStatus) => void;
   public onProgress?: (progress: number, currentPos: THREE.Vector3) => void;
+  public onEtaUpdate?: (remainingSec: number, remainingDist: number) => void;
 
   constructor(
     vehicle: THREE.Object3D,
@@ -2044,7 +2053,7 @@ export class EmergencyVehicleController {
     this.vehicle = vehicle;
     this.waypoints = waypoints;
     this.speed = options?.speed ?? speed;
-    this._baseY = options?.baseY ?? (waypoints[0]?.y ?? 1.95);
+    this._baseY = options?.baseY ?? (waypoints[0]?.y ?? ANCHORS.AMBULANCE.position.y);
     this.tireTracemarks = options?.tireTracemarks;
 
     this.onWaypointReached = options?.onWaypointReached;
@@ -2052,6 +2061,7 @@ export class EmergencyVehicleController {
     this.onRouteBlocked = options?.onRouteBlocked;
     this.onStatusChange = options?.onStatusChange;
     this.onProgress = options?.onProgress;
+    this.onEtaUpdate = options?.onEtaUpdate;
 
     this._computeDistances();
 
@@ -2079,6 +2089,37 @@ export class EmergencyVehicleController {
     }
   }
 
+  /**
+   * Computes remaining distance along remaining route segments to destination.
+   */
+  public getRemainingDistance(): number {
+    if (this.status === "AT_INCIDENT" || this.waypoints.length < 2) return 0;
+    if (this.currentWaypointIndex >= this.waypoints.length - 1) return 0;
+
+    const currentTarget = this.waypoints[this.currentWaypointIndex + 1];
+    const pos = this.vehicle.position;
+    const dx = currentTarget.x - pos.x;
+    const dz = currentTarget.z - pos.z;
+    const distToNext = Math.sqrt(dx * dx + dz * dz);
+
+    let remainingAfter = 0;
+    for (let i = this.currentWaypointIndex + 1; i < this.waypoints.length - 1; i++) {
+      remainingAfter += this.waypoints[i].distanceTo(this.waypoints[i + 1]);
+    }
+    return distToNext + remainingAfter;
+  }
+
+  /**
+   * Computes estimated remaining time in seconds to reach the destination.
+   */
+  public getRemainingTimeSec(): number {
+    if (this.status === "STANDBY") {
+      return Math.max(1, Math.round(this._totalDist / Math.max(0.1, this.speed)));
+    }
+    if (this.status === "AT_INCIDENT") return 0;
+    return Math.max(0, Math.round(this.getRemainingDistance() / Math.max(0.1, this.speed)));
+  }
+
   public setRouteVisual(
     routeVisual: THREE.Group & { updateProgress?: (progress: number, currentPos: THREE.Vector3) => void }
   ) {
@@ -2099,7 +2140,11 @@ export class EmergencyVehicleController {
    */
   public dispatch() {
     this.status = "DISPATCHED";
-    this.updateStatusBadge();
+    const remDist = this.getRemainingDistance();
+    const remSec = Math.max(1, Math.ceil(remDist / Math.max(0.1, this.speed)));
+    this._lastReportedSec = remSec;
+    this.updateStatusBadge(remSec);
+    this.onEtaUpdate?.(remSec, remDist);
     this.onStatusChange?.("DISPATCHED");
   }
 
@@ -2114,7 +2159,11 @@ export class EmergencyVehicleController {
     this.currentWaypointIndex = 0;
     this.progress = 0;
     this.status = "EN_ROUTE";
-    this.updateStatusBadge();
+    const remDist = this.getRemainingDistance();
+    const remSec = Math.max(1, Math.ceil(remDist / Math.max(0.1, this.speed)));
+    this._lastReportedSec = remSec;
+    this.updateStatusBadge(remSec);
+    this.onEtaUpdate?.(remSec, remDist);
     this.onStatusChange?.("EN_ROUTE");
   }
 
@@ -2129,12 +2178,14 @@ export class EmergencyVehicleController {
   public complete() {
     this.status = "AT_INCIDENT";
     this.progress = 1.0;
+    this._lastReportedSec = 0;
     if (this.waypoints.length > 0) {
       const dest = this.waypoints[this.waypoints.length - 1];
       this.vehicle.position.set(dest.x, this._baseY, dest.z);
     }
-    this.updateStatusBadge();
+    this.updateStatusBadge(0);
     this._routeVisualGroup?.updateProgress?.(1.0, this.vehicle.position);
+    this.onEtaUpdate?.(0, 0);
     this.onStatusChange?.("AT_INCIDENT");
     this.onRouteComplete?.();
   }
@@ -2143,6 +2194,7 @@ export class EmergencyVehicleController {
     this.status = "STANDBY";
     this.progress = 0;
     this.currentWaypointIndex = 0;
+    this._lastReportedSec = -1;
 
     const resetPos = standbyPos || (this.waypoints.length > 0 ? this.waypoints[0] : ANCHORS.AMBULANCE.position);
     this.vehicle.position.set(resetPos.x, this._baseY, resetPos.z);
@@ -2157,14 +2209,16 @@ export class EmergencyVehicleController {
 
     this.tireTracemarks?.clear();
 
-    this.updateStatusBadge();
+    const totalSec = Math.max(1, Math.round(this._totalDist / Math.max(0.1, this.speed)));
+    this.updateStatusBadge(totalSec);
+    this.onEtaUpdate?.(totalSec, this._totalDist);
     this.onStatusChange?.("STANDBY");
   }
 
   /**
-   * Updates vehicle status badge pin texture in real time.
+   * Updates vehicle status badge pin texture in real time with destination ETA.
    */
-  public updateStatusBadge(): void {
+  public updateStatusBadge(remSec?: number): void {
     const isAmbulance = this.vehicle.name === "AMB-001" || this.vehicle.getObjectByName("siren_red") !== undefined;
     const badgeName = isAmbulance ? "ambulance_status_badge" : "extinguisher_status_badge";
     const badge = this.vehicle.getObjectByName(badgeName) as THREE.Sprite;
@@ -2175,16 +2229,18 @@ export class EmergencyVehicleController {
       let bg = "rgba(15, 23, 42, 0.90)";
       let border = "#38bdf8";
 
+      const eta = remSec !== undefined ? remSec : Math.ceil(this.getRemainingTimeSec());
+
       if (this.status === "DISPATCHED") {
-        text = "🚨 MEDIC-17 [DISPATCHED]";
+        text = `🚨 MEDIC-17 [DISPATCHED — ${eta}s to Dest]`;
         bg = "rgba(225, 29, 72, 0.95)";
         border = "#f43f5e";
       } else if (this.status === "EN_ROUTE") {
-        text = "🚑 MEDIC-17 [EN ROUTE]";
+        text = `🚑 MEDIC-17 [EN ROUTE — ${eta}s to Dest]`;
         bg = "rgba(190, 18, 60, 0.95)";
         border = "#ef4444";
       } else if (this.status === "AT_INCIDENT") {
-        text = "🏥 MEDIC-17 [AT INCIDENT]";
+        text = "🏥 MEDIC-17 [AT DESTINATION — ON SCENE]";
         bg = "rgba(6, 78, 59, 0.95)";
         border = "#10b981";
       }
@@ -2213,6 +2269,7 @@ export class EmergencyVehicleController {
    * - Waypoint-to-waypoint progress along road centerline
    * - Suspension vibration & siren flashing
    * - Progressive route tracing updates
+   * - Real-time destination ETA countdown and distance dispatch
    */
   public update(dtSec: number): void {
     if (this.status === "STANDBY") {
@@ -2235,7 +2292,11 @@ export class EmergencyVehicleController {
     if (this.status === "DISPATCHED") {
       // Auto transition to active EN_ROUTE as vehicle departs standby
       this.status = "EN_ROUTE";
-      this.updateStatusBadge();
+      const remDist = this.getRemainingDistance();
+      const remSec = Math.max(1, Math.ceil(remDist / Math.max(0.1, this.speed)));
+      this._lastReportedSec = remSec;
+      this.updateStatusBadge(remSec);
+      this.onEtaUpdate?.(remSec, remDist);
       this.onStatusChange?.("EN_ROUTE");
     }
 
@@ -2262,7 +2323,7 @@ export class EmergencyVehicleController {
     const turnRate = Math.min(1.0, 9.5 * dtSec); // Smooth responsive vehicle turn
     this.vehicle.rotation.y += diff * turnRate;
 
-    // 2. Centerline Translation
+    // 2. Centerline Translation (slow, controlled emergency speed)
     const step = this.speed * dtSec;
     if (dist <= step + 0.18) {
       pos.x = currentTarget.x;
@@ -2306,7 +2367,16 @@ export class EmergencyVehicleController {
       this.progress = Math.min(1.0, Math.max(0, covered / this._totalDist));
     }
 
-    // 6. Progressive Route Visual Update (Traveled line vs remaining line & arrows)
+    // 6. Real-time Remaining Distance & ETA calculation (reported on integer second update)
+    const remDist = this.getRemainingDistance();
+    const remSec = Math.max(0, Math.ceil(remDist / Math.max(0.1, this.speed)));
+    if (this._lastReportedSec !== remSec) {
+      this._lastReportedSec = remSec;
+      this.updateStatusBadge(remSec);
+      this.onEtaUpdate?.(remSec, remDist);
+    }
+
+    // 7. Progressive Route Visual Update (Traveled line vs remaining line & arrows)
     this._routeVisualGroup?.updateProgress?.(this.progress, pos);
     this.onProgress?.(this.progress, pos);
   }
