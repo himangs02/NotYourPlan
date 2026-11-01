@@ -140,26 +140,26 @@ function buildHallAttendees(count: number, gate2Blocked: boolean): AgentState[] 
 
     if (gate2Blocked) {
       if (i % 2 === 0) {
-        startDoor = new THREE.Vector3(-14.0, 0.22, 10.8); // West concourse exit
+        startDoor = new THREE.Vector3(-12.0, 1.95, 8.0); // West concourse exit
         waypoints = CROWD_FLOW_GATE2_BLOCKED_G4;
       } else {
-        startDoor = new THREE.Vector3(14.0, 0.22, 10.8);  // East concourse exit
+        startDoor = new THREE.Vector3(12.0, 1.95, 8.0);  // East concourse exit
         waypoints = CROWD_FLOW_GATE2_BLOCKED_G3;
       }
     } else {
       // Main street exit onto Food Court Concourse / Plaza
-      startDoor = new THREE.Vector3(randomBetween(-2.8, 2.8), 0.22, 11.0);
+      startDoor = new THREE.Vector3(randomBetween(-2.8, 2.8), 1.95, 9.0);
       waypoints = CROWD_FLOW_NORMAL;
     }
 
-    // Populate attendees along the street evacuation stream
+    // Populate attendees along the street evacuation stream heading outward
     const startIdx = Math.floor(Math.random() * (waypoints.length - 1));
     const p1 = waypoints[startIdx];
     const p2 = waypoints[startIdx + 1];
     const alpha = Math.random();
     const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
-    pos.x += randomBetween(-1.6, 1.6);
-    pos.y = 0.22;
+    pos.x += randomBetween(-1.2, 1.2);
+    pos.y = 1.95;
 
     agents.push({
       pos,
@@ -176,14 +176,14 @@ function buildHallWheelchairs(count: number): AgentState[] {
   const agents: AgentState[] = [];
   const waypoints = CROWD_FLOW_STEPFREE;
   for (let i = 0; i < count; i++) {
-    const startDoor = new THREE.Vector3(-14.0, 0.22, 10.8);
+    const startDoor = new THREE.Vector3(-12.0, 1.95, 8.0);
     const startIdx = Math.floor(Math.random() * (waypoints.length - 1));
     const p1 = waypoints[startIdx];
     const p2 = waypoints[startIdx + 1];
     const alpha = Math.random();
     const pos = new THREE.Vector3().lerpVectors(p1, p2, alpha);
     pos.x += randomBetween(-0.8, 0.8);
-    pos.y = 0.22;
+    pos.y = 1.95;
 
     agents.push({
       pos,
@@ -195,6 +195,8 @@ function buildHallWheelchairs(count: number): AgentState[] {
   }
   return agents;
 }
+
+
 
 let _attendeeAgents: AgentState[] = [];
 let _wheelAgents: AgentState[] = [];
@@ -1197,6 +1199,10 @@ export class TwinAssetLibrary {
 
   public static setFireState(isFireActive: boolean, gate2Blocked: boolean = false): void {
     this._isFireActive = isFireActive;
+    if (isFireActive) {
+      _agentsBuilt = false;
+      ensureAgents(gate2Blocked);
+    }
   }
 
   public static isFireActive(): boolean {
@@ -1446,6 +1452,12 @@ export class TwinAssetLibrary {
     }
   }
 
+  public static isSystematicMode = false;
+
+  public static setSystematicMode(isSystematic: boolean): void {
+    this.isSystematicMode = isSystematic;
+  }
+
   public static updateCrowdAnimation(
     dt: number,
     attendeeMesh: THREE.InstancedMesh,
@@ -1476,26 +1488,63 @@ export class TwinAssetLibrary {
     }
 
     // ACTIVE EVACUATION: Attendees are FULLY VISIBLE and running out towards safety!
+    const isSystematic = this.isSystematicMode;
+    const maxActiveAttendees = isSystematic ? 72 : _attendeeAgents.length;
+    const maxActiveWheelchairs = isSystematic ? 16 : _wheelAgents.length;
+
     _attendeeAgents.forEach((a, i) => {
+      if (isSystematic && i >= maxActiveAttendees) {
+        // Reduced crowd: staged attendees wait inside building in safety
+        dummy.position.set(0, -999, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        attendeeMesh.setMatrixAt(i, dummy.matrix);
+        return;
+      }
+
       const target = a.waypoints[a.waypointIdx];
-      const dx = target.x - a.pos.x;
-      const dz = target.z - a.pos.z;
+      let targetX = target.x;
+      let targetZ = target.z;
+
+      if (isSystematic) {
+        // SYSTEMATIC & ARRANGED EGRESS:
+        // Form two neat, orderly columns/lanes exiting strictly south
+        // Lane 0: x = -1.1, Lane 1: x = +1.1
+        const laneOffset = (i % 2 === 0) ? -1.1 : 1.1;
+        targetX = laneOffset;
+        // Smoothly guide current x into lane
+        a.pos.x = THREE.MathUtils.lerp(a.pos.x, laneOffset, 0.08);
+      }
+
+      const dx = targetX - a.pos.x;
+      const dz = targetZ - a.pos.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      const step = a.speed * dtSec * 60;
+      const effectiveSpeed = isSystematic ? 0.14 : a.speed;
+      const step = effectiveSpeed * dtSec * 60;
 
       if (dist < step + 0.3) {
         a.waypointIdx++;
         if (a.waypointIdx >= a.waypoints.length) {
-          // Wrap back to street exit to maintain a continuous, vibrant evacuation stream
-          a.waypointIdx = 0;
-          a.pos.set(a.startDoor.x + randomBetween(-1.5, 1.5), 0.22, a.startDoor.z);
+          a.waypointIdx = 1;
+          if (isSystematic) {
+            const laneOffset = (i % 2 === 0) ? -1.1 : 1.1;
+            a.pos.set(laneOffset, 1.95, a.startDoor.z);
+          } else {
+            // Unmanaged chaotic crowd reset
+            a.pos.set(a.startDoor.x + randomBetween(-2.0, 2.0), 1.95, a.startDoor.z);
+          }
         }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
 
-      dummy.position.set(a.pos.x, 0.22, a.pos.z);
+      if (!isSystematic) {
+        // In unmanaged/rogue mode: chaotic crowd jostling and sideways spill
+        a.pos.x += Math.sin(Date.now() * 0.003 + i) * 0.018;
+      }
+
+      dummy.position.set(a.pos.x, 1.95, a.pos.z);
       dummy.scale.setScalar(1.25);
       if (dist > 0.01) {
         dummy.rotation.set(0, Math.atan2(dx, dz), 0);
@@ -1507,24 +1556,33 @@ export class TwinAssetLibrary {
 
     // Wheelchair users actively evacuating along Step-Free Ramp route
     _wheelAgents.forEach((a, i) => {
+      if (isSystematic && i >= maxActiveWheelchairs) {
+        dummy.position.set(0, -999, 0);
+        dummy.scale.set(0, 0, 0);
+        dummy.updateMatrix();
+        wheelMesh.setMatrixAt(i, dummy.matrix);
+        return;
+      }
+
       const target = a.waypoints[a.waypointIdx];
       const dx = target.x - a.pos.x;
       const dz = target.z - a.pos.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      const step = a.speed * dtSec * 60;
+      const effectiveSpeed = isSystematic ? 0.11 : a.speed;
+      const step = effectiveSpeed * dtSec * 60;
 
       if (dist < step + 0.3) {
         a.waypointIdx++;
         if (a.waypointIdx >= a.waypoints.length) {
-          a.waypointIdx = 0;
-          a.pos.set(a.startDoor.x + randomBetween(-0.8, 0.8), 0.22, a.startDoor.z);
+          a.waypointIdx = 1;
+          a.pos.set(a.startDoor.x + (isSystematic ? 0 : randomBetween(-0.8, 0.8)), 1.95, a.startDoor.z);
         }
       } else {
         a.pos.x += (dx / dist) * step;
         a.pos.z += (dz / dist) * step;
       }
 
-      dummy.position.set(a.pos.x, 0.22, a.pos.z);
+      dummy.position.set(a.pos.x, 1.95, a.pos.z);
       dummy.scale.setScalar(1.25);
       if (dist > 0.01) {
         dummy.rotation.set(0, Math.atan2(dx, dz), 0);
@@ -1541,7 +1599,7 @@ export class TwinAssetLibrary {
    * Zero translation, engine idling, sirens off/standby, vehicle facing forward down Road 17.
    */
   public static updateAmbulanceStandby(ambGroup: THREE.Object3D): void {
-    ambGroup.position.set(ANCHORS.AMBULANCE.position.x, 0.38, ANCHORS.AMBULANCE.position.z);
+    ambGroup.position.set(ANCHORS.AMBULANCE.position.x, 1.95, ANCHORS.AMBULANCE.position.z);
     ambGroup.rotation.set(0, 0, 0); // Vehicle points +Z along Road 17
 
     const sirenRed = ambGroup.getObjectByName("siren_red") as THREE.Mesh;
@@ -1857,18 +1915,11 @@ export class AmbulanceTireTracemarks {
     const treadGeo = new THREE.BufferGeometry();
     const pts: THREE.Vector3[] = [];
     // North-South paved Road 17 at x = 16.5
-    for (let z = -30; z <= 10.8; z += 1.8) {
-      pts.push(new THREE.Vector3(16.5 - 1.15, 0.22, z));
-      pts.push(new THREE.Vector3(16.5 - 1.15, 0.22, z + 0.9));
-      pts.push(new THREE.Vector3(16.5 + 1.15, 0.22, z));
-      pts.push(new THREE.Vector3(16.5 + 1.15, 0.22, z + 0.9));
-    }
-    // Concourse turn into Auditorium access at z = 10.8
-    for (let x = 16.5; x >= 1.5; x -= 1.8) {
-      pts.push(new THREE.Vector3(x, 0.22, 10.8 - 1.15));
-      pts.push(new THREE.Vector3(x - 0.9, 0.22, 10.8 - 1.15));
-      pts.push(new THREE.Vector3(x, 0.22, 10.8 + 1.15));
-      pts.push(new THREE.Vector3(x - 0.9, 0.22, 10.8 + 1.15));
+    for (let z = -28; z <= 8.0; z += 1.8) {
+      pts.push(new THREE.Vector3(16.5 - 1.15, 1.97, z));
+      pts.push(new THREE.Vector3(16.5 - 1.15, 1.97, z + 0.9));
+      pts.push(new THREE.Vector3(16.5 + 1.15, 1.97, z));
+      pts.push(new THREE.Vector3(16.5 + 1.15, 1.97, z + 0.9));
     }
     treadGeo.setFromPoints(pts);
     const treadMat = new THREE.LineBasicMaterial({
@@ -1889,7 +1940,7 @@ export class AmbulanceTireTracemarks {
     const perpX = Math.cos(heading);
     const perpZ = -Math.sin(heading);
     const halfWidth = 1.15;
-    const y = 0.24; // Elevated directly onto road surface
+    const y = 1.97; // Elevated directly onto road surface
 
     const curL = new THREE.Vector3(pos.x - perpX * halfWidth, y, pos.z - perpZ * halfWidth);
     const curR = new THREE.Vector3(pos.x + perpX * halfWidth, y, pos.z + perpZ * halfWidth);
@@ -1972,7 +2023,7 @@ export class EmergencyVehicleController {
   private _totalDist: number = 0;
   private _cumulativeDist: number[] = [];
   private _targetHeading: number = 0;
-  private _baseY: number = 0.38;
+  private _baseY: number = 1.95;
   private _sirenTimer: number = 0;
   private _routeVisualGroup?: THREE.Group & {
     updateProgress?: (progress: number, currentPos: THREE.Vector3) => void;
@@ -1993,7 +2044,7 @@ export class EmergencyVehicleController {
     this.vehicle = vehicle;
     this.waypoints = waypoints;
     this.speed = options?.speed ?? speed;
-    this._baseY = options?.baseY ?? (waypoints[0]?.y ?? 0.38);
+    this._baseY = options?.baseY ?? (waypoints[0]?.y ?? 1.95);
     this.tireTracemarks = options?.tireTracemarks;
 
     this.onWaypointReached = options?.onWaypointReached;

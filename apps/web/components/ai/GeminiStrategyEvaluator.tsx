@@ -18,6 +18,7 @@ export interface CandidatePlanItem {
   name: string;
   status: "PASS" | "FAIL";
   final_score: number | null;
+  success_rate?: number;
   aggregate_metrics: PlanMetrics;
   rejection_reasons?: string[];
 }
@@ -144,7 +145,12 @@ Return ONLY valid JSON.
 
     // High-Fidelity Verified Deterministic Fallback Synthesis
     const isG2Blocked = blockedGate === "gate_2";
-    const recommendedId = isG2Blocked ? "plan_d" : "plan_b";
+    const bestPlan = plans.reduce((prev, curr) => {
+      const prevRate = prev.success_rate ?? (prev.status === "PASS" ? 85 : 50);
+      const currRate = curr.success_rate ?? (curr.status === "PASS" ? 85 : 50);
+      return currRate > prevRate ? curr : prev;
+    }, plans[0]);
+    const recommendedId = isG2Blocked ? (plans.find(p => p.plan_id.includes("ramp") || p.plan_id.includes("plan_d"))?.plan_id || bestPlan.plan_id) : bestPlan.plan_id;
     setBestPlanId(recommendedId);
 
     const fallbackEvals: GeminiPlanPrediction[] = plans.map((p) => {

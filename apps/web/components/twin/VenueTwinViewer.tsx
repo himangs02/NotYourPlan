@@ -77,6 +77,7 @@ interface VenueTwinViewerProps {
   isEvacuating?: boolean;
   onToggleEvacuation?: () => void;
   onDeployExtinguisher?: () => void;
+  isSystematicEvacuation?: boolean;
 }
 
 export default function VenueTwinViewer({
@@ -99,6 +100,7 @@ export default function VenueTwinViewer({
   isEvacuating: externalIsEvacuating = false,
   onToggleEvacuation,
   onDeployExtinguisher,
+  isSystematicEvacuation = false,
 }: VenueTwinViewerProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -146,6 +148,10 @@ export default function VenueTwinViewer({
   useEffect(() => {
     setIsEvacuating(externalIsEvacuating);
   }, [externalIsEvacuating]);
+
+  useEffect(() => {
+    TwinAssetLibrary.setSystematicMode(Boolean(isSystematicEvacuation));
+  }, [isSystematicEvacuation]);
 
   // GLB state
   const [cityLoading, setCityLoading] = useState(true);
@@ -1171,7 +1177,7 @@ export default function VenueTwinViewer({
       } else {
         const amb = scene.getObjectByName("AMB-001");
         if (amb) {
-          amb.position.set(ANCHORS.AMBULANCE.position.x, 0.38, ANCHORS.AMBULANCE.position.z);
+          amb.position.set(ANCHORS.AMBULANCE.position.x, 1.95, ANCHORS.AMBULANCE.position.z);
           amb.rotation.set(0, 0, 0);
           TwinAssetLibrary.updateAmbulanceStandby(amb);
         }
@@ -1183,7 +1189,7 @@ export default function VenueTwinViewer({
       } else {
         const fe2 = scene.getObjectByName("FE-002");
         if (fe2) {
-          fe2.position.set(ANCHORS.FIRE_EXTINGUISHER_2.position.x, 0.38, ANCHORS.FIRE_EXTINGUISHER_2.position.z);
+          fe2.position.set(ANCHORS.FIRE_EXTINGUISHER_2.position.x, 1.95, ANCHORS.FIRE_EXTINGUISHER_2.position.z);
           fe2.rotation.set(0, 0, 0);
         }
       }

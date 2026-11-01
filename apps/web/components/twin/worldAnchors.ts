@@ -63,13 +63,13 @@ export const ANCHORS = {
     cameraTarget: new THREE.Vector3(0, 0, 23),
   },
   GATE_3: {
-    position: new THREE.Vector3(16.5, 0, 10.8),
+    position: new THREE.Vector3(16.5, 1.95, 8.0),
     label: "Gate 3 (East Arcade & Road 17 Junction)",
     id: "gate_3",
     widthM: 5.0,
     flowCapacity: 6.5,
-    cameraPos: new THREE.Vector3(36, 20, 10.8),
-    cameraTarget: new THREE.Vector3(16.5, 0, 10.8),
+    cameraPos: new THREE.Vector3(36, 20, 8.0),
+    cameraTarget: new THREE.Vector3(16.5, 1.95, 8.0),
   },
   GATE_4: {
     position: new THREE.Vector3(-15, 0, 10.8),
@@ -84,14 +84,14 @@ export const ANCHORS = {
 
   // ── ROUTES ─────────────────────────────────────────────────────────────────
   ROAD_17: {
-    position: new THREE.Vector3(16.5, 0.05, -10),
+    position: new THREE.Vector3(16.5, 1.95, -10.0),
     dimensions: { width: 5.2, length: 44 },
     label: "Road 17 — Emergency Medical Corridor",
     id: "road_17",
     isEmergency: true,
     constraintMaxDelaySec: 30,
     cameraPos: new THREE.Vector3(32, 24, 0),
-    cameraTarget: new THREE.Vector3(16.5, 0, -10),
+    cameraTarget: new THREE.Vector3(16.5, 1.95, -10.0),
   },
   STEP_FREE_RAMP: {
     position: new THREE.Vector3(-18, 0.2, 10.8),
@@ -111,7 +111,7 @@ export const ANCHORS = {
 
   // ── EMERGENCY RESOURCES (Phase 1 & Phase 1.1) ──────────────────────────────
   AMBULANCE: {
-    position: new THREE.Vector3(16.5, 0.38, -30.0),
+    position: new THREE.Vector3(16.5, 1.95, -28.0),
     label: "Ambulance 01 — MEDIC-17",
     id: "AMB-001",
   },
@@ -180,11 +180,11 @@ export const CROWD_FLOW_STEPFREE = [
 
 /** Emergency responders: Road 17 corridor */
 export const ROAD_17_CORRIDOR = [
-  new THREE.Vector3(16.5, 0.38, -30.0),
-  new THREE.Vector3(16.5, 0.38, -16.0),
-  new THREE.Vector3(16.5, 0.38, 0.0),
-  new THREE.Vector3(16.5, 0.38, 10.8),
-  new THREE.Vector3(1.5, 0.38, 10.8),
+  new THREE.Vector3(16.5, 1.95, -28.0),
+  new THREE.Vector3(16.5, 1.95, -18.0),
+  new THREE.Vector3(16.5, 1.95, -8.0),
+  new THREE.Vector3(16.5, 1.95, 0.0),
+  new THREE.Vector3(16.5, 1.95, 8.0),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,37 +202,30 @@ export const EMERGENCY_RESPONDER_SPEED = 2.8;
  * and stages directly at the front of the Auditorium (x = 1.5, z = 10.8).
  */
 export const AMBULANCE_SAFE_ROUTE = [
-  new THREE.Vector3(16.5, 0.38, -30.0),  // Ambulance Standby 01 (strictly on paved Road 17)
-  new THREE.Vector3(16.5, 0.38, -22.0),  // Road 17 North
-  new THREE.Vector3(16.5, 0.38, -14.0),  // Road 17 Mid (Emergency Corridor)
-  new THREE.Vector3(16.5, 0.38, -6.0),   // Road 17 Central
-  new THREE.Vector3(16.5, 0.38, 2.0),    // Road 17 South
-  new THREE.Vector3(16.5, 0.38, 8.5),    // Approaching Concourse Avenue intersection
-  new THREE.Vector3(15.0, 0.38, 10.8),   // Smooth curved turn west onto open Concourse Avenue
-  new THREE.Vector3(11.0, 0.38, 10.8),   // Westbound Concourse Avenue
-  new THREE.Vector3(6.0, 0.38, 10.8),    // Open concourse staging
-  new THREE.Vector3(1.5, 0.38, 10.8),    // Main Auditorium Staging Area / Emergency Incident Entry
+  new THREE.Vector3(16.5, 1.95, -28.0), // Standby on Road 17 North
+  new THREE.Vector3(16.5, 1.95, -20.0), // Road 17 North
+  new THREE.Vector3(16.5, 1.95, -12.0), // Road 17 Mid (Emergency Corridor)
+  new THREE.Vector3(16.5, 1.95, -4.0),  // Road 17 Central
+  new THREE.Vector3(16.5, 1.95, 2.0),   // Road 17 Incident Approach
+  new THREE.Vector3(16.5, 1.95, 8.0),   // Road 17 Staging Area (Auditorium Incident Entry)
 ];
 
 /** Recalculated bypass ambulance route when Road 17 mid-segment is obstructed */
 export const AMBULANCE_REROUTE_PATH = [
-  new THREE.Vector3(16.5, 0.38, -30.0),  // Standby on Road 17 North
-  new THREE.Vector3(16.5, 0.38, -22.0),  // Turn East onto North Cross Street
-  new THREE.Vector3(26.0, 0.38, -22.0),  // North Parking Avenue
-  new THREE.Vector3(26.0, 0.38, -10.0),  // Parking Plaza Outer Lane
-  new THREE.Vector3(26.0, 0.38, 0.0),    // Parking Plaza Central
-  new THREE.Vector3(26.0, 0.38, 10.8),   // East Concourse Turn
-  new THREE.Vector3(16.5, 0.38, 10.8),   // Rejoin main cross avenue
-  new THREE.Vector3(8.0, 0.38, 10.8),    // Concourse Approach
-  new THREE.Vector3(1.5, 0.38, 10.8),    // Main Auditorium Emergency Entry
+  new THREE.Vector3(16.5, 1.95, -28.0), // Standby on Road 17 North
+  new THREE.Vector3(16.5, 1.95, -20.0), // Road 17 North
+  new THREE.Vector3(26.0, 1.95, -20.0), // Bypass East outer lane
+  new THREE.Vector3(26.0, 1.95, -8.0),  // Bypass outer corridor
+  new THREE.Vector3(26.0, 1.95, 2.0),   // Bypass outer corridor south
+  new THREE.Vector3(16.5, 1.95, 8.0),   // Rejoin Road 17 Staging Area
 ];
 
 /** Primary extinguisher response route: FE-002 -> West Concourse -> Auditorium Entry */
 export const FE_002_SAFE_ROUTE = [
-  new THREE.Vector3(-14.5, 0.38, 10.8),  // FE-002 station (West Concourse)
-  new THREE.Vector3(-10.0, 0.38, 10.8),  // West Concourse Approach
-  new THREE.Vector3(-5.0, 0.38, 10.8),   // Front Concourse Junction
-  new THREE.Vector3(-1.5, 0.38, 10.8),   // Main Auditorium Access / Staging
+  new THREE.Vector3(-14.5, 1.95, 10.8),  // FE-002 station (West Concourse)
+  new THREE.Vector3(-10.0, 1.95, 10.8),  // West Concourse Approach
+  new THREE.Vector3(-5.0, 1.95, 10.8),   // Front Concourse Junction
+  new THREE.Vector3(-1.5, 1.95, 10.8),   // Main Auditorium Access / Staging
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
