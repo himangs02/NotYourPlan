@@ -1494,48 +1494,48 @@ export default function VenueTwinViewer({
         </div>
       )}
 
-      {/* ── Apple Dynamic Island Real-Time Ambulance HUD ────────────── */}
+      {/* ── Real-Time Ambulance HUD (Corner Widget - Non-blocking) ────────────── */}
       {isFireActive && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex flex-col items-center max-w-[94%] sm:max-w-md animate-in fade-in slide-in-from-top-2 duration-300">
-          <div className={`px-4 py-2 sm:px-5 sm:py-2.5 rounded-full border shadow-[0_12px_36px_rgba(0,0,0,0.7)] backdrop-blur-2xl flex items-center gap-3.5 transition-all duration-300 ${liveAmbEta?.status === "AT_INCIDENT"
-              ? "bg-zinc-950/90 border-emerald-500/40 text-emerald-200 shadow-[0_0_24px_rgba(16,185,129,0.25)]"
-              : "bg-zinc-950/90 border-white/[0.12] text-white"
+        <div className="absolute top-14 right-3 z-20 pointer-events-none flex flex-col items-end animate-in fade-in slide-in-from-right-2 duration-300">
+          <div className={`px-3.5 py-1.5 rounded-2xl border shadow-xl backdrop-blur-xl flex items-center gap-2.5 transition-all duration-300 ${liveAmbEta?.status === "AT_INCIDENT"
+              ? "bg-zinc-950/90 border-emerald-500/40 text-emerald-200 shadow-[0_0_16px_rgba(16,185,129,0.2)]"
+              : "bg-zinc-950/90 border-white/[0.12] text-white shadow-lg"
             }`}>
-            <div className="relative flex items-center justify-center shrink-0 w-8 h-8 rounded-full bg-white/10 text-white">
-              <Siren className="w-4 h-4 text-amber-400 animate-pulse" />
+            <div className="relative flex items-center justify-center shrink-0 w-6 h-6 rounded-full bg-white/10 text-white">
+              <Siren className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
               {liveAmbEta?.status !== "AT_INCIDENT" && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
                 </span>
               )}
             </div>
 
             <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold tracking-tight text-zinc-200 truncate">
-                  Ambulance 01 <span className="text-zinc-500 font-mono text-[10px]">MEDIC-17</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold tracking-tight text-zinc-200 truncate">
+                  Ambulance 01 <span className="text-zinc-500 font-mono text-[9px]">MEDIC-17</span>
                 </span>
-                <span className={`text-[9px] font-mono font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${liveAmbEta?.status === "AT_INCIDENT"
+                <span className={`text-[8px] font-mono font-medium px-1.5 py-0.2 rounded-full border whitespace-nowrap ${liveAmbEta?.status === "AT_INCIDENT"
                     ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20"
                     : "bg-amber-500/10 text-amber-300 border-amber-500/20"
                   }`}>
-                  {liveAmbEta?.status === "AT_INCIDENT" ? "ARRIVED AT SCENE" : "EN ROUTE · SLOW"}
+                  {liveAmbEta?.status === "AT_INCIDENT" ? "ARRIVED" : "EN ROUTE"}
                 </span>
               </div>
 
-              <div className="flex items-baseline gap-1.5 sm:gap-2 mt-0.5 flex-wrap">
-                <span className="text-[10px] text-zinc-400 font-medium whitespace-nowrap">Destination ETA:</span>
-                <span className={`font-mono font-bold tracking-tight ${liveAmbEta?.status === "AT_INCIDENT"
-                    ? "text-emerald-400 text-xs sm:text-sm"
-                    : "text-amber-300 text-sm sm:text-base drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]"
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-[9px] text-zinc-400 font-medium">ETA:</span>
+                <span className={`font-mono font-bold text-xs tracking-tight ${liveAmbEta?.status === "AT_INCIDENT"
+                    ? "text-emerald-400"
+                    : "text-amber-300 drop-shadow-[0_0_6px_rgba(251,191,36,0.4)]"
                   }`}>
                   {liveAmbEta?.status === "AT_INCIDENT"
                     ? "00:00 (ARRIVED)"
                     : `${Math.floor((liveAmbEta?.remainingSec ?? 29) / 60).toString().padStart(2, "0")}:${((liveAmbEta?.remainingSec ?? 29) % 60).toString().padStart(2, "0")}`}
                 </span>
-                <span className="text-[9px] text-zinc-500 font-mono whitespace-nowrap">
-                  ({Math.round((liveAmbEta?.remainingDist ?? 36) * 5)}m &bull; {ambRerouted ? "Bypass Lane" : "Road 17 Safe Lane"})
+                <span className="text-[8px] text-zinc-500 font-mono">
+                  ({Math.round((liveAmbEta?.remainingDist ?? 36) * 5)}m &bull; {ambRerouted ? "Bypass" : "Road 17"})
                 </span>
               </div>
             </div>
@@ -1552,7 +1552,7 @@ export default function VenueTwinViewer({
 
       {/* ── Road 17 congestion alert ─────────────────────────────────────── */}
       {road17Congested && !cityLoading && (
-        <div className="absolute top-12 right-3 z-10 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-[10px] font-semibold text-rose-700 pointer-events-none flex items-center gap-1.5 shadow-sm">
+        <div className="absolute top-28 right-3 z-10 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-200 text-[10px] font-semibold text-rose-700 pointer-events-none flex items-center gap-1.5 shadow-sm">
           <Siren className="w-3 h-3 text-rose-600" />
           <span>Road 17 Congestion &gt;30s</span>
         </div>
